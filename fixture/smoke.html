@@ -13,7 +13,7 @@
   localStorage.clear();
   const config = {
     project: 'fixture',
-    families: [{ key: 'card', label: 'Card', variants: [
+    families: [{ key: 'card', label: 'Card', effect: { scope: 'card', attribute: 'card-variant' }, variants: [
       { name: 'one' }, { name: 'two', defaults: { gap: 3 } },
     ] }],
     controls: [
@@ -45,7 +45,7 @@
   toggle.dispatchEvent(new Event('change', { bubbles: true }));
   const card = document.querySelector('[data-fd-scope="card"]');
   const grid = document.querySelector('[data-fd-scope="grid"]');
-  const passed = root && card.getAttribute('data-fd-variant-card') === 'two' &&
+  const passed = root && card.getAttribute('data-card-variant') === 'two' &&
     card.getAttribute('data-card-density') === 'roomy' && card.getAttribute('data-featured') === 'true' &&
     grid.style.getPropertyValue('--fd-gap') === '4rem' &&
     new URL(location.href).searchParams.has('fd');
