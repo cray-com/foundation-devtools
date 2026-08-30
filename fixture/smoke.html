@@ -6,23 +6,26 @@
   [data-fd-scope="card"] { color: rebeccapurple; }
 </style>
 <main class="grid" data-fd-target="hero" data-fd-scope="grid"><article data-fd-scope="card">Card</article><article data-fd-scope="card">Card</article></main>
+<aside data-fd-target="hero" data-fd-scope="grid">Second registered hero target</aside>
+<section data-fd-target="notes">Notes</section>
 <script type="module">
   window.addEventListener('error', (event) => { document.title = `FD error ${event.message}`; });
   import { defineDevtoolsElement } from '../dist/element.js';
+  import { applyEffects, initialState } from '../dist/core.js';
 
   localStorage.clear();
   const config = {
     project: 'fixture',
-    targets: [{ key: 'hero', label: 'Hero', kind: 'section' }],
+    targets: [{ key: 'global', label: 'Global', kind: 'global' }, { key: 'hero', label: 'Hero', kind: 'section' }, { key: 'notes', label: 'Notes', kind: 'section' }],
     families: [{ key: 'card', label: 'Card', target: 'hero', effect: { scope: 'card', attribute: 'card-variant' }, variants: [
       { name: 'one' }, { name: 'two', defaults: { gap: 3 } },
     ] }],
     controls: [
       { type: 'range', key: 'gap', label: 'Gap', min: 1, max: 4, default: 2, target: 'hero',
         unit: 'rem', effect: { scope: 'grid', variable: '--fd-gap' } },
-      { type: 'select', key: 'density', label: 'Density', options: ['compact', 'roomy'], default: 'compact',
+      { type: 'select', key: 'density', label: 'Density', options: ['compact', 'roomy'], default: 'compact', target: 'global',
         effect: { scope: 'card', attribute: 'card-density' } },
-      { type: 'toggle', key: 'featured', label: 'Featured', default: false,
+      { type: 'toggle', key: 'featured', label: 'Featured', default: false, target: 'global',
         effect: { scope: 'card', attribute: 'featured' } },
     ],
   };
@@ -47,10 +50,16 @@
   const card = document.querySelector('[data-fd-scope="card"]');
   const grid = document.querySelector('[data-fd-scope="grid"]');
   const map = root.querySelector('.map');
-  const mapCounts = map && /All \(4\/2\)/.test(map.textContent) && map.textContent.includes('Global') && map.textContent.includes('Section');
+  const mapCounts = map && map.textContent.includes('All 4 · Δ4') && map.textContent.includes('Global 2 · Δ2') && map.textContent.includes('Hero 2 · Δ2') && map.textContent.includes('Notes 0 · Δ0');
+  const isolatedRoot = document.querySelectorAll('[data-fd-target="hero"]')[1];
+  isolatedRoot.style.removeProperty('--fd-gap');
+  const isolatedState = initialState(config); isolatedState.values.gap = 3;
+  applyEffects(config, isolatedState, isolatedRoot);
+  const rootScopedEffect = isolatedRoot.style.getPropertyValue('--fd-gap') === '3rem';
+  applyEffects(config, { families: { card: 'two' }, values: { gap: 4, density: 'roomy', featured: true } });
   const passed = root && card.getAttribute('data-card-variant') === 'two' &&
     card.getAttribute('data-card-density') === 'roomy' && card.getAttribute('data-featured') === 'true' &&
-    grid.style.getPropertyValue('--fd-gap') === '4rem' && mapCounts &&
+    grid.style.getPropertyValue('--fd-gap') === '4rem' && rootScopedEffect && Array.from(document.querySelectorAll('[data-fd-target="hero"]')).every((element) => element.style.getPropertyValue('--fd-gap') === '4rem') && mapCounts &&
     new URL(location.href).searchParams.has('fd');
   root.querySelector('[data-action="hide"]').click();
   const hidden = root.querySelector('.panel').classList.contains('hidden');
@@ -62,20 +71,40 @@
   root.querySelector('[data-action="changes"]').click();
   await new Promise((resolve) => setTimeout(resolve, 50));
   const copiedChanges = ['Copied', 'Copy unavailable'].includes(root.querySelector('.status').textContent);
+  root.querySelector('[data-action="brief"]').click();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const copiedBrief = ['Copied', 'Copy unavailable'].includes(root.querySelector('.status').textContent);
   root.querySelector('[data-action="compare-original"]').click();
-  const originalApplied = grid.style.getPropertyValue('--fd-gap') === '2rem';
+  const originalApplied = grid.style.getPropertyValue('--fd-gap') === '2rem' && root.querySelector('[data-action="compare-original"]').getAttribute('aria-pressed') === 'true';
   root.querySelector('[data-action="compare-modified"]').click();
-  const modifiedRestored = grid.style.getPropertyValue('--fd-gap') === '4rem';
+  const modifiedRestored = grid.style.getPropertyValue('--fd-gap') === '4rem' && root.querySelector('[data-action="compare-modified"]').getAttribute('aria-pressed') === 'true';
+
+  const notesButton = root.querySelector('[data-map-target="notes"]');
+  notesButton.click();
+  const emptyTarget = root.querySelector('.body').textContent.includes('Keine Controls für dieses Target.');
+  root.querySelector('[data-map-target="all"]').click();
+  root.querySelector('[data-action="reset-control"][data-control="gap"]').click();
+  const controlReset = grid.style.getPropertyValue('--fd-gap') === '2rem';
+  range.value = '4'; range.dispatchEvent(new Event('input', { bubbles: true }));
+
   root.querySelector('[data-action="pick"]').click();
   const hero = document.querySelector('[data-fd-target="hero"]');
   hero.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }));
   const marked = hero.style.outline !== '';
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
-  const cleaned = hero.style.outline === '';
+  const cleaned = hero.style.outline === '' && !hero.hasAttribute('tabindex');
+  root.querySelector('[data-action="pick"]').click();
+  hero.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  const picked = root.querySelector('[data-map-target="hero"]').getAttribute('aria-pressed') === 'true' && hero.style.outline === '' && !hero.hasAttribute('tabindex');
+  root.querySelector('[data-action="reset-target"]').click();
+  const targetReset = grid.style.getPropertyValue('--fd-gap') === '2rem' && card.getAttribute('data-card-variant') === 'one';
+  root.querySelector('[data-action="reset"]').click();
+  const fullReset = card.getAttribute('data-card-density') === 'compact' && card.getAttribute('data-featured') === 'false' && root.querySelector('[data-map-target="all"] .count').textContent.endsWith('Δ0');
+
   root.querySelector('[data-action="json"]').click();
   range.focus();
   await new Promise((resolve) => setTimeout(resolve, 50));
   const feedback = ['Copied', 'Copy unavailable'].includes(root.querySelector('.status').textContent);
-  document.title = passed && initiallyCollapsed && opened && hidden && restoredCollapsed && shortcutOpened && feedback && copiedChanges && originalApplied && modifiedRestored && marked && cleaned
+  document.title = passed && initiallyCollapsed && opened && hidden && restoredCollapsed && shortcutOpened && feedback && copiedChanges && copiedBrief && originalApplied && modifiedRestored && emptyTarget && controlReset && marked && cleaned && picked && targetReset && fullReset
     ? 'FD browser PASS' : 'FD browser FAIL';
 </script>

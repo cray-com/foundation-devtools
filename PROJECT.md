@@ -36,9 +36,9 @@ serialisierbare Website-Konfiguration
 
 Der Astro-Adapter montiert ein browserseitiges Custom Element. Das Panel verwendet Shadow DOM, damit Website-CSS und Tool-CSS einander nicht beeinflussen.
 
-## V1
+## V1.1
 
-V1 liefert:
+V1.1 liefert:
 
 - Range-, Select- und Toggle-Controls; optionale Target/Page-Map-Zuordnung (`global`/`section`) und Token-/Local-Klassifikation; labeled Select-Optionen;
 - stabile Changes-/JSON-/Agent-Brief-Exporte gegenüber `initialState` (reiner Design-State, ohne Panel-UI-State);

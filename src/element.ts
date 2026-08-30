@@ -23,7 +23,8 @@ const styles = `
 .bar { display: flex; align-items: center; gap: 6px; padding: 5px 7px; background: #22262a; position: sticky; top: 0; }
 .title { flex: 1; font-weight: 700; } button { border: 0; border-radius: 3px; padding: 4px 6px; color: inherit; background: #292e34; cursor: pointer; } .icon { background: transparent; font-size: 15px; }
 button:focus, select:focus, input:focus { outline: 2px solid #74b9ff; outline-offset: 1px; } button[aria-pressed="true"] { background: #4a5868; color: #fff; }
-.body { display: grid; gap: 8px; padding: 9px; } .control { display: grid; gap: 3px; } label { display: flex; justify-content: space-between; gap: 8px; color: #c8cdd3; } output { color: #fff; }
+.body { display: grid; gap: 8px; padding: 9px; } .compare { display: flex; gap: 3px; } .map { display: grid; gap: 2px; padding: 5px; border: 1px solid #353a40; border-radius: 4px; } .map::before { content: 'Page'; padding: 1px 3px 3px; color: #9ba3ad; text-transform: uppercase; letter-spacing: .08em; } .map button { display: flex; justify-content: space-between; gap: 8px; text-align: left; } .count { color: #9ba3ad; font-variant-numeric: tabular-nums; }
+.control { display: grid; gap: 3px; } .control.changed label::after { content: 'modified'; color: #9dbde0; font-size: 10px; } label { display: flex; justify-content: space-between; gap: 8px; color: #c8cdd3; } output { margin-left: auto; color: #fff; }
 input, select { width: 100%; min-width: 0; color: #fff; background: #292e34; border: 1px solid #555b64; border-radius: 3px; padding: 3px; } input[type=checkbox] { width: auto; justify-self: start; }
 .meta, .status { padding: 7px 9px; color: #9ba3ad; border-top: 1px solid #353a40; } .status:empty { display: none; } footer { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 8px; border-top: 1px solid #353a40; } .collapsed .body, .collapsed footer, .collapsed .meta, .collapsed .status { display: none; } .hidden { display: none; }
 @media (max-width: 420px) { :host { inset: auto 6px 6px auto; } .panel { width: min(320px, calc(100vw - 12px)); max-height: calc(100vh - 12px); } }
@@ -39,8 +40,6 @@ export class FoundationDevtoolsElement extends HTMLElement {
   private ready = false;
   private selectedTarget: string | undefined;
   private compareMode: 'modified' | 'original' = 'modified';
-  private targetFilter = '';
-  private targetKind: 'all' | 'global' | 'section' = 'all';
   private pickerCleanup?: () => void;
 
   connectedCallback(): void {
@@ -98,36 +97,26 @@ export class FoundationDevtoolsElement extends HTMLElement {
     compare.querySelector<HTMLButtonElement>('[data-action="compare-original"]')!.setAttribute('aria-pressed', String(this.compareMode === 'original'));
     compare.querySelector<HTMLButtonElement>('[data-action="compare-modified"]')!.setAttribute('aria-pressed', String(this.compareMode === 'modified'));
     body.append(compare);
+    const changedKeys = new Set(changes(this.config, this.state).changes.map((entry) => entry.key));
     if (this.config.targets?.length) {
-      const map = document.createElement('nav'); map.className = 'map'; map.setAttribute('aria-label', 'Targets');
-      const search = document.createElement('input'); search.type = 'search'; search.placeholder = 'Filter targets'; search.value = this.targetFilter; search.setAttribute('aria-label', 'Filter targets');
-      search.addEventListener('input', () => { this.targetFilter = search.value; this.render(); }); map.append(search);
-      for (const kind of ['all', 'global', 'section'] as const) { const tab = document.createElement('button'); tab.textContent = kind[0].toUpperCase() + kind.slice(1); tab.dataset.mapKind = kind; tab.setAttribute('aria-pressed', String(this.targetKind === kind)); tab.addEventListener('click', () => { this.targetKind = kind; this.render(); }); map.append(tab); }
-      const diff = changes(this.config, this.state).changes;
-      const matches = (key: string) => { const target = this.config!.targets!.find((item) => item.key === key); return key === 'all' ? !this.targetFilter : (this.targetKind === 'all' || target?.kind === this.targetKind) && (!this.targetFilter || (target?.label ?? key).toLowerCase().includes(this.targetFilter.toLowerCase())); };
-      const all = ['all', ...this.config.targets.map((target) => target.key)].filter(matches);
-      for (const key of all) {
+      const map = document.createElement('nav'); map.className = 'map'; map.setAttribute('aria-label', 'Page targets');
+      for (const key of ['all', ...this.config.targets.map((target) => target.key)]) {
         const target = key === 'all' ? undefined : this.config.targets.find((item) => item.key === key);
-        const available = key === 'all' ? this.config.families.length + (this.config.controls ?? []).length : this.config.families.filter((item) => item.target === key).length + (this.config.controls ?? []).filter((item) => item.target === key).length;
-        const changed = key === 'all' ? diff.length : diff.filter((item) => item.target === key).length;
         const button = document.createElement('button');
-        button.textContent = `${key === 'all' ? 'All' : target!.label} (${available}/${changed})`;
-        button.dataset.target = key;
+        button.dataset.mapTarget = key;
         button.setAttribute('aria-pressed', String((this.selectedTarget ?? 'all') === key));
+        button.append(document.createTextNode(`${key === 'all' ? 'All' : target!.label} `), this.targetCount(key));
         button.addEventListener('click', () => {
           this.selectedTarget = key === 'all' ? undefined : key;
-          if (target?.kind === 'section') {
-            const section = document.querySelector<HTMLElement>(`[data-fd-target="${CSS.escape(key)}"]`);
-            section?.scrollIntoView({ block: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
-            if (section) { const previous = section.style.outline; section.style.outline = '2px solid #8f98a3'; window.setTimeout(() => { section.style.outline = previous; }, 500); }
-          }
+          if (target?.kind === 'section') this.revealTarget(key);
           this.render();
         });
         map.append(button);
       }
       body.append(map);
-      if (this.selectedTarget) { const resetTarget = document.createElement('button'); resetTarget.textContent = 'Reset target'; resetTarget.dataset.action = 'reset-target'; resetTarget.dataset.control = this.selectedTarget; body.append(resetTarget); }
-      if (all.length === 0) { const empty = document.createElement('p'); empty.textContent = 'Keine Targets gefunden.'; map.append(empty); }
+      if (this.selectedTarget && this.availableForTarget(this.selectedTarget) > 0) {
+        const resetTarget = document.createElement('button'); resetTarget.textContent = 'Reset target'; resetTarget.dataset.action = 'reset-target'; resetTarget.dataset.control = this.selectedTarget; body.append(resetTarget);
+      }
     }
     let rendered = 0;
     for (const family of this.config.families) {
@@ -144,7 +133,9 @@ export class FoundationDevtoolsElement extends HTMLElement {
         this.render();
         this.update();
       });
-      body.append(this.row(family.label, select, `fd-family-label-${family.key}`));
+      const row = this.row(family.label, select, `fd-family-label-${family.key}`);
+      row.dataset.changeKey = family.key; row.classList.toggle('changed', changedKeys.has(family.key));
+      body.append(row);
     }
     for (const control of this.config.controls ?? []) { if (!this.selectedTarget || control.target === this.selectedTarget) { rendered++; body.append(this.control(control)); } }
     if (this.selectedTarget && rendered === 0) { const empty = document.createElement('p'); empty.textContent = 'Keine Controls für dieses Target.'; body.append(empty); }
@@ -200,12 +191,56 @@ export class FoundationDevtoolsElement extends HTMLElement {
       });
     }
     const row = this.row(control.label, input, `fd-label-${control.key}`, control.type === 'range' ? output : undefined);
+    row.dataset.changeKey = control.key;
+    row.classList.toggle('changed', Boolean(this.config && this.state && changes(this.config, this.state).changes.some((entry) => entry.key === control.key)));
     const reset = document.createElement('button'); reset.textContent = 'Reset'; reset.dataset.action = 'reset-control'; reset.dataset.control = control.key; row.append(reset);
     return row;
   }
 
   private rangeText(control: Range, value: string): string {
     return `${value}${control.unit ?? ''}`;
+  }
+
+  private availableForTarget(target: string): number {
+    if (!this.config) return 0;
+    if (target === 'all') return this.config.families.length + (this.config.controls ?? []).length;
+    return this.config.families.filter((item) => item.target === target).length
+      + (this.config.controls ?? []).filter((item) => item.target === target).length;
+  }
+
+  private changedForTarget(target: string): number {
+    if (!this.config || !this.state) return 0;
+    const entries = changes(this.config, this.state).changes;
+    return target === 'all' ? entries.length : entries.filter((entry) => entry.target === target).length;
+  }
+
+  private targetCount(target: string): HTMLElement {
+    const count = document.createElement('span');
+    count.className = 'count';
+    count.textContent = `${this.availableForTarget(target)} · Δ${this.changedForTarget(target)}`;
+    count.title = 'Available · modified';
+    return count;
+  }
+
+  private revealTarget(key: string): void {
+    const section = document.querySelector<HTMLElement>(`[data-fd-target="${CSS.escape(key)}"]`);
+    if (!section) return;
+    section.scrollIntoView({ block: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    const previous = section.style.outline;
+    section.style.outline = '2px solid #8f98a3';
+    window.setTimeout(() => { if (section.style.outline === '2px solid rgb(143, 152, 163)' || section.style.outline === '2px solid #8f98a3') section.style.outline = previous; }, 500);
+  }
+
+  private refreshIndicators(): void {
+    if (!this.config || !this.state || !this.shadowRoot) return;
+    const changedKeys = new Set(changes(this.config, this.state).changes.map((entry) => entry.key));
+    for (const row of this.shadowRoot.querySelectorAll<HTMLElement>('[data-change-key]')) row.classList.toggle('changed', changedKeys.has(row.dataset.changeKey ?? ''));
+    for (const button of this.shadowRoot.querySelectorAll<HTMLButtonElement>('[data-map-target]')) {
+      const count = button.querySelector<HTMLElement>('.count');
+      if (count) count.replaceWith(this.targetCount(button.dataset.mapTarget ?? 'all'));
+    }
+    this.shadowRoot.querySelector<HTMLButtonElement>('[data-action="compare-original"]')?.setAttribute('aria-pressed', String(this.compareMode === 'original'));
+    this.shadowRoot.querySelector<HTMLButtonElement>('[data-action="compare-modified"]')?.setAttribute('aria-pressed', String(this.compareMode === 'modified'));
   }
 
   private restorePanelMode(): void {
@@ -239,7 +274,9 @@ export class FoundationDevtoolsElement extends HTMLElement {
 
   private update(): void {
     if (!this.config || !this.state) return;
+    this.compareMode = 'modified';
     this.apply();
+    this.refreshIndicators();
     try {
       history.replaceState(null, '', stateUrl(this.config, this.state));
     } catch {
@@ -273,15 +310,40 @@ export class FoundationDevtoolsElement extends HTMLElement {
     if (!this.config?.targets) return;
     const keys = this.config.targets.filter((target) => target.kind === 'section').map((target) => target.key);
     const elements = keys.flatMap((key) => Array.from(document.querySelectorAll<HTMLElement>(`[data-fd-target="${CSS.escape(key)}"]`)));
-    const old = new Map<HTMLElement, string>(); let hovered: HTMLElement | undefined;
-    const listeners = new Map<HTMLElement, { enter: () => void; leave: () => void; focus: () => void }>();
-    const clearMark = () => { if (hovered) { hovered.style.outline = old.get(hovered) ?? ''; hovered = undefined; } };
-    const mark = (element: HTMLElement) => { clearMark(); old.set(element, element.style.outline); hovered = element; element.style.outline = '2px solid #8f98a3'; };
-    const cleanup = () => { clearMark(); elements.forEach((element) => { element.removeEventListener('click', onClick); const listener = listeners.get(element); if (listener) { element.removeEventListener('pointerenter', listener.enter); element.removeEventListener('pointerleave', listener.leave); element.removeEventListener('focus', listener.focus); } }); document.removeEventListener('keydown', onKey); this.pickerCleanup = undefined; };
-    const onClick = (event: Event) => { const element = event.currentTarget as HTMLElement; event.preventDefault(); event.stopPropagation(); this.selectedTarget = element.dataset.fdTarget; cleanup(); this.render(); };
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') cleanup(); };
-    elements.forEach((element) => { const enter = () => mark(element); const leave = () => { if (hovered === element) clearMark(); }; const focus = () => mark(element); listeners.set(element, { enter, leave, focus }); element.addEventListener('pointerenter', enter); element.addEventListener('pointerleave', leave); element.addEventListener('focus', focus); element.addEventListener('click', onClick); });
-    document.addEventListener('keydown', onKey); this.pickerCleanup = cleanup;
+    const oldOutline = new Map<HTMLElement, string>();
+    const oldTabIndex = new Map<HTMLElement, string | null>();
+    let hovered: HTMLElement | undefined;
+    const listeners = new Map<HTMLElement, { enter: () => void; leave: () => void; focus: () => void; key: (event: KeyboardEvent) => void }>();
+    const clearMark = () => { if (hovered) { hovered.style.outline = oldOutline.get(hovered) ?? ''; hovered = undefined; } };
+    const mark = (element: HTMLElement) => { clearMark(); oldOutline.set(element, element.style.outline); hovered = element; element.style.outline = '2px solid #8f98a3'; };
+    const select = (element: HTMLElement, event: Event) => { event.preventDefault(); event.stopPropagation(); this.selectedTarget = element.dataset.fdTarget; cleanup(); this.render(); };
+    const cleanup = () => {
+      clearMark();
+      elements.forEach((element) => {
+        element.removeEventListener('click', onClick);
+        const listener = listeners.get(element);
+        if (listener) { element.removeEventListener('pointerenter', listener.enter); element.removeEventListener('pointerleave', listener.leave); element.removeEventListener('focus', listener.focus); element.removeEventListener('keydown', listener.key); }
+        const tabIndex = oldTabIndex.get(element);
+        if (tabIndex === null) element.removeAttribute('tabindex'); else if (tabIndex !== undefined) element.setAttribute('tabindex', tabIndex);
+      });
+      document.removeEventListener('keydown', onDocumentKey);
+      this.pickerCleanup = undefined;
+    };
+    const onClick = (event: Event) => select(event.currentTarget as HTMLElement, event);
+    const onDocumentKey = (event: KeyboardEvent) => { if (event.key === 'Escape') cleanup(); };
+    elements.forEach((element) => {
+      const enter = () => mark(element);
+      const leave = () => { if (hovered === element) clearMark(); };
+      const focus = () => mark(element);
+      const key = (event: KeyboardEvent) => { if (event.key === 'Enter' || event.key === ' ') select(element, event); };
+      listeners.set(element, { enter, leave, focus, key });
+      oldTabIndex.set(element, element.getAttribute('tabindex'));
+      element.tabIndex = 0;
+      element.addEventListener('pointerenter', enter); element.addEventListener('pointerleave', leave); element.addEventListener('focus', focus); element.addEventListener('keydown', key); element.addEventListener('click', onClick);
+    });
+    document.addEventListener('keydown', onDocumentKey);
+    this.pickerCleanup = cleanup;
+    elements[0]?.focus({ preventScroll: true });
   }
 
   private async copy(value: string): Promise<void> {

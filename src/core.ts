@@ -98,7 +98,7 @@ function fail(message: string): never {
 }
 
 function validateEffect(effect: unknown): asserts effect is Effect {
-  if (!isRecord(effect) || !scopePattern.test(String(effect.scope))) {
+  if (!isRecord(effect) || typeof effect.scope !== 'string' || !scopePattern.test(effect.scope)) {
     fail('effect scope');
   }
   const hasVariable = typeof effect.variable === 'string';
@@ -187,6 +187,7 @@ export function validateConfig(input: unknown): DevtoolsConfig {
           !Number.isFinite(min) || !Number.isFinite(max) || !Number.isFinite(step) ||
           min >= max || step <= 0 || typeof controlValue.default !== 'number' ||
           !Number.isFinite(controlValue.default) || controlValue.default < min || controlValue.default > max ||
+          !isOnStep(controlValue.default, min, step) ||
           typeof unit !== 'string' || !unitPattern.test(unit)) {
         fail('range');
       }
@@ -225,8 +226,13 @@ function isValidOption(option: unknown): option is SelectOption {
 
 function optionValue(option: SelectOption): string { return typeof option === 'string' ? option : option.value; }
 
+function isOnStep(value: number, min: number, step: number): boolean {
+  const steps = (value - min) / step;
+  return Math.abs(steps - Math.round(steps)) < 1e-9;
+}
+
 function isValidValue(control: Control, value: unknown): value is ControlValue {
-  if (control.type === 'range') return typeof value === 'number' && Number.isFinite(value) && value >= control.min && value <= control.max;
+  if (control.type === 'range') return typeof value === 'number' && Number.isFinite(value) && value >= control.min && value <= control.max && isOnStep(value, control.min, control.step ?? 1);
   if (control.type === 'select') return typeof value === 'string' && control.options.some((option) => optionValue(option) === value);
   return typeof value === 'boolean';
 }
@@ -298,11 +304,20 @@ export function formatCssValue(control: Range, value: number): string {
 
 function scopedElements(root: ParentNode, scope: string, target?: string, targets?: readonly Target[]): HTMLElement[] {
   const targetDefinition = target ? targets?.find((item) => item.key === target) : undefined;
-  const base = target && targetDefinition?.kind === 'section' ? root.querySelector<HTMLElement>(`[data-fd-target="${CSS.escape(target)}"]`) : root;
-  if (!base) return [];
+  const targetSelector = target ? `[data-fd-target="${CSS.escape(target)}"]` : '';
+  const bases: ParentNode[] = target && targetDefinition?.kind === 'section'
+    ? [
+        ...(root instanceof HTMLElement && root.matches(targetSelector) ? [root] : []),
+        ...Array.from(root.querySelectorAll<HTMLElement>(targetSelector)),
+      ]
+    : [root];
   const selector = `[data-fd-scope="${CSS.escape(scope)}"]`;
-  const descendants = Array.from(base.querySelectorAll<HTMLElement>(selector));
-  return base instanceof HTMLElement && base.matches(selector) ? [base, ...descendants] : descendants;
+  const elements = new Set<HTMLElement>();
+  for (const base of bases) {
+    if (base instanceof HTMLElement && base.matches(selector)) elements.add(base);
+    for (const descendant of base.querySelectorAll<HTMLElement>(selector)) elements.add(descendant);
+  }
+  return Array.from(elements);
 }
 
 export function applyEffects(config: DevtoolsConfig, state: DevtoolsState, root: ParentNode = document): void {

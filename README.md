@@ -5,7 +5,7 @@
 ## Installation
 
 ```bash
-npm install --save-dev https://github.com/cray-com/foundation-devtools/releases/download/v0.1.1/cray-com-foundation-devtools-0.1.1.tgz
+npm install --save-dev https://github.com/cray-com/foundation-devtools/releases/download/v0.2.0/cray-com-foundation-devtools-0.2.0.tgz
 ```
 
 ## Astro
@@ -78,7 +78,7 @@ Website-CSS kann Tailwind über semantische Layer verwenden. Dynamische Reglerwe
 
 ## Öffentliche Schnittstelle
 
-`DevtoolsConfig`, `Metadata`, `Target`, `Family`, `Variant`, `Range`, `Select`, `Toggle`, `DevtoolsState` sowie `defineDevtoolsConfig`, `validateConfig`, `initialState`, `validateState`, `encodeState`, `decodeState`, `stateUrl`, `applyEffects`, `changes`, `changesJson`, `agentBrief`, `resetBaseline`, `recipe` und `typescriptRecipe` sind serialisierbar bzw. strict typisiert. Nicht-kanonische Alias-Exporte werden nicht angeboten. Ungültige URL-Werte werden verworfen (fail-closed).
+`DevtoolsConfig`, `Metadata`, `Target`, `Family`, `Variant`, `Range`, `Select`, `SelectOption`, `Toggle`, `DevtoolsState` sowie `defineDevtoolsConfig`, `validateConfig`, `initialState`, `validateState`, `encodeState`, `decodeState`, `stateUrl`, `applyEffects`, `changes`, `changesJson`, `agentBrief`, `resetBaseline`, `recipe` und `typescriptRecipe` sind serialisierbar bzw. strict typisiert. Nicht-kanonische Alias-Exporte werden nicht angeboten. Ungültige URL-Werte werden verworfen (fail-closed).
 
 Das Panel startet platzsparend eingeklappt. Es bietet Reset, Permalink-, JSON- und TypeScript-Copy sowie JSON-Download. Es ist vollständig ausblendbar und per Cmd/Ctrl+Shift+D wiederherstellbar beziehungsweise umschaltbar. Tastaturfokus und Reduced Motion werden berücksichtigt. URL-State verwendet nur den Parameter `fd` und erhält vorhandene Parameter.
 
