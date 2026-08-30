@@ -1,0 +1,20 @@
+---
+import FoundationDevtools from '@cray-com/foundation-devtools/astro';
+import { defineDevtoolsConfig } from '@cray-com/foundation-devtools';
+
+const config = defineDevtoolsConfig({
+  project: 'astro-fixture',
+  families: [{ key: 'card', label: 'Card', variants: [{ name: 'default' }] }],
+  controls: [{
+    type: 'range', key: 'gap', label: 'Gap', min: 1, max: 4, default: 2,
+    effect: { scope: 'grid', variable: '--fd-gap' },
+  }],
+});
+---
+<html lang="en">
+  <head><meta charset="utf-8" /><title>Astro fixture</title></head>
+  <body>
+    <main data-fd-scope="grid"><article data-fd-scope="card">Fixture card</article></main>
+    <FoundationDevtools config={config} />
+  </body>
+</html>

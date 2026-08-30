@@ -5,3 +5,6 @@ playwright-report/
 test-results/
 .DS_Store
 *.tgz
+
+fixture/astro/dist/
+fixture/astro/.astro/
