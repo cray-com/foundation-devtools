@@ -1,4 +1,5 @@
 ---
+import browserSource from './browser.js?raw';
 import type { DevtoolsConfig } from './core.js';
 
 interface Props {
@@ -12,16 +13,6 @@ const serializedConfig = JSON.stringify(config).replace(/</g, '\\u003c');
   <>
     <foundation-devtools data-fd-config="foundation-devtools-config"></foundation-devtools>
     <script type="application/json" data-fd-config-json set:html={serializedConfig}></script>
-    <script>
-      import { defineDevtoolsElement } from '@cray-com/foundation-devtools/element';
-
-      const configScript = document.querySelector('[data-fd-config-json]');
-      const host = document.querySelector('foundation-devtools[data-fd-config]');
-      if (configScript && host) {
-        const config = JSON.parse(configScript.textContent || '{}');
-        host.replaceWith(defineDevtoolsElement(config));
-        configScript.remove();
-      }
-    </script>
+    <script is:inline type="module" set:html={browserSource}></script>
   </>
 )}

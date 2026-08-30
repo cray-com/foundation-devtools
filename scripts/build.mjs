@@ -1,5 +1,16 @@
-import { mkdir, cp, writeFile } from 'node:fs/promises';
+import { cp, mkdir, writeFile } from 'node:fs/promises';
+import { build } from 'esbuild';
+
 await mkdir('dist', { recursive: true });
+await build({
+  bundle: true,
+  entryPoints: ['src/browser-entry.ts'],
+  format: 'esm',
+  minify: true,
+  outfile: 'dist/browser.js',
+  platform: 'browser',
+  target: ['es2022'],
+});
 await cp('README.md', 'dist/README.md');
 await cp('src/FoundationDevtools.astro', 'dist/FoundationDevtools.astro');
 await writeFile('dist/astro.d.ts', `import type { AstroComponentFactory } from 'astro/runtime/server/index.js';\nimport type { DevtoolsConfig } from './core.js';\nexport type FoundationDevtoolsProps = { config: DevtoolsConfig };\ndeclare const FoundationDevtools: AstroComponentFactory;\nexport default FoundationDevtools;\nexport type { DevtoolsConfig };\n`);
