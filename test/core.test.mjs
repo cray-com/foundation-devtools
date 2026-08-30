@@ -12,6 +12,9 @@ test('targets, labeled options and fail-closed object validation', () => {
   const modified = validateState(targetConfig, { families: { layout: 'wide' }, values: { density: 'compact' } });
   assert.equal(changes(targetConfig, modified).count, 1);
   assert.equal(changes(targetConfig, resetBaseline(targetConfig, modified, 'hero')).count, 0);
+  const variantConfig = defineDevtoolsConfig({ project: 'variants', targets: [{ key: 'hero', label: 'Hero', kind: 'section' }], families: [{ key: 'family', label: 'Family', target: 'hero', variants: [{ name: 'base' }, { name: 'custom', defaults: { density: 'compact' } }] }], controls: [{ type: 'select', key: 'density', label: 'Density', options: ['roomy', 'compact'], default: 'roomy', effect: { scope: 'hero', attribute: 'density' } }] });
+  const stale = validateState(variantConfig, { families: { family: 'custom' }, values: { density: 'compact' } });
+  assert.equal(changes(variantConfig, resetBaseline(variantConfig, stale, 'hero')).count, 0);
   for (const options of [[{ label: 'Missing value' }], [{ value: '', label: 'Empty' }], [{ value: 'x' }]]) assert.throws(() => defineDevtoolsConfig({ project: 'x', families: [{ key: 'f', label: 'F', variants: [{ name: 'a' }] }], controls: [{ type: 'select', key: 's', label: 'S', options, default: 'x', effect: { scope: 'f', attribute: 'x' } }] }));
 });
 

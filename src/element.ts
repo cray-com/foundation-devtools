@@ -22,7 +22,7 @@ const styles = `
 .panel { width: min(360px, calc(100vw - 24px)); max-height: min(760px, calc(100vh - 24px)); overflow: auto; background: #17191c; border: 1px solid #454a51; border-radius: 6px; box-shadow: 0 5px 24px #0008; }
 .bar { display: flex; align-items: center; gap: 6px; padding: 5px 7px; background: #22262a; position: sticky; top: 0; }
 .title { flex: 1; font-weight: 700; } button { border: 0; border-radius: 3px; padding: 4px 6px; color: inherit; background: #292e34; cursor: pointer; } .icon { background: transparent; font-size: 15px; }
-button:focus, select:focus, input:focus { outline: 2px solid #74b9ff; outline-offset: 1px; }
+button:focus, select:focus, input:focus { outline: 2px solid #74b9ff; outline-offset: 1px; } button[aria-pressed="true"] { background: #4a5868; color: #fff; }
 .body { display: grid; gap: 8px; padding: 9px; } .control { display: grid; gap: 3px; } label { display: flex; justify-content: space-between; gap: 8px; color: #c8cdd3; } output { color: #fff; }
 input, select { width: 100%; min-width: 0; color: #fff; background: #292e34; border: 1px solid #555b64; border-radius: 3px; padding: 3px; } input[type=checkbox] { width: auto; justify-self: start; }
 .meta, .status { padding: 7px 9px; color: #9ba3ad; border-top: 1px solid #353a40; } .status:empty { display: none; } footer { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 8px; border-top: 1px solid #353a40; } .collapsed .body, .collapsed footer, .collapsed .meta, .collapsed .status { display: none; } .hidden { display: none; }
@@ -94,7 +94,9 @@ export class FoundationDevtoolsElement extends HTMLElement {
     const body = this.shadowRoot!.querySelector('.body')!;
     body.replaceChildren();
     const compare = document.createElement('div'); compare.className = 'compare';
-    compare.innerHTML = '<button data-action="compare-original">Original</button><button data-action="compare-modified">Modified</button>';
+    compare.innerHTML = '<button data-action="compare-original" aria-pressed="false">Original</button><button data-action="compare-modified" aria-pressed="true">Modified</button>';
+    compare.querySelector<HTMLButtonElement>('[data-action="compare-original"]')!.setAttribute('aria-pressed', String(this.compareMode === 'original'));
+    compare.querySelector<HTMLButtonElement>('[data-action="compare-modified"]')!.setAttribute('aria-pressed', String(this.compareMode === 'modified'));
     body.append(compare);
     if (this.config.targets?.length) {
       const map = document.createElement('nav'); map.className = 'map'; map.setAttribute('aria-label', 'Targets');
@@ -102,7 +104,7 @@ export class FoundationDevtoolsElement extends HTMLElement {
       search.addEventListener('input', () => { this.targetFilter = search.value; this.render(); }); map.append(search);
       for (const kind of ['all', 'global', 'section'] as const) { const tab = document.createElement('button'); tab.textContent = kind[0].toUpperCase() + kind.slice(1); tab.dataset.mapKind = kind; tab.setAttribute('aria-pressed', String(this.targetKind === kind)); tab.addEventListener('click', () => { this.targetKind = kind; this.render(); }); map.append(tab); }
       const diff = changes(this.config, this.state).changes;
-      const matches = (key: string) => { const target = this.config!.targets!.find((item) => item.key === key); return key === 'all' || (this.targetKind === 'all' || target?.kind === this.targetKind) && (!this.targetFilter || (target?.label ?? key).toLowerCase().includes(this.targetFilter.toLowerCase())); };
+      const matches = (key: string) => { const target = this.config!.targets!.find((item) => item.key === key); return key === 'all' ? !this.targetFilter : (this.targetKind === 'all' || target?.kind === this.targetKind) && (!this.targetFilter || (target?.label ?? key).toLowerCase().includes(this.targetFilter.toLowerCase())); };
       const all = ['all', ...this.config.targets.map((target) => target.key)].filter(matches);
       for (const key of all) {
         const target = key === 'all' ? undefined : this.config.targets.find((item) => item.key === key);

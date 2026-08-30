@@ -381,8 +381,9 @@ export function resetBaseline(config: DevtoolsConfig, state: DevtoolsState, targ
   if (!target) return baseline;
   for (const family of config.families) if (family.target === target) {
     result.families[family.key] = baseline.families[family.key];
-    const variant = family.variants.find((item) => item.name === baseline.families[family.key]);
-    for (const key of Object.keys(variant?.defaults ?? {})) result.values[key] = baseline.values[key];
+    // A reset must also clear defaults from the previously selected variant.
+    const variantKeys = new Set(family.variants.flatMap((variant) => Object.keys(variant.defaults ?? {})));
+    for (const key of variantKeys) result.values[key] = baseline.values[key];
   }
   for (const control of config.controls ?? []) if (control.target === target) result.values[control.key] = baseline.values[control.key];
   return result;
