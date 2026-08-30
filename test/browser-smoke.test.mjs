@@ -1,33 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { spawn } from 'node:child_process';
-
-async function chromium(url) {
-  const profile = await mkdtemp(join(tmpdir(), 'foundation-devtools-chromium-'));
-  try {
-    return await new Promise((resolve, reject) => {
-      const child = spawn('chromium', [
-        '--headless=new', '--no-sandbox', '--disable-gpu', '--allow-file-access-from-files', '--force-prefers-reduced-motion',
-        `--user-data-dir=${profile}`, '--virtual-time-budget=1000', '--dump-dom', url,
-      ], { stdio: ['ignore', 'pipe', 'pipe'] });
-      const timeout = setTimeout(() => child.kill('SIGKILL'), 30000);
-      let output = '';
-      let errors = '';
-      child.stdout.on('data', (chunk) => { output += chunk; });
-      child.stderr.on('data', (chunk) => { errors += chunk; });
-      child.on('error', reject);
-      child.on('close', (code) => {
-        clearTimeout(timeout);
-        code === 0 ? resolve(output) : reject(new Error(errors || `Chromium exited with ${code}`));
-      });
-    });
-  } finally {
-    await rm(profile, { force: true, recursive: true });
-  }
-}
+import { readFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
+import { chromium } from '@playwright/test';
 
 test('Astro fixture covers production and browser contracts', async () => {
   const html = await readFile('fixture/index.html', 'utf8');
@@ -37,6 +12,15 @@ test('Astro fixture covers production and browser contracts', async () => {
   const production = await readFile('fixture/astro/dist/index.html', 'utf8');
   assert.doesNotMatch(production, /foundation-devtools|data-fd-config/);
 
-  const output = await chromium(`file://${process.cwd()}/fixture/smoke.html`);
-  assert.match(output, /<title>FD browser PASS<\/title>/);
+  const browser = await chromium.launch({ args: ['--allow-file-access-from-files'], headless: true });
+  try {
+    const context = await browser.newContext({ reducedMotion: 'reduce' });
+    const page = await context.newPage();
+    await page.goto(pathToFileURL(`${process.cwd()}/fixture/smoke.html`).href, { waitUntil: 'load' });
+    await page.waitForFunction(() => document.title === 'FD browser PASS', undefined, { timeout: 10_000 });
+    assert.equal(await page.title(), 'FD browser PASS');
+    await context.close();
+  } finally {
+    await browser.close();
+  }
 });
