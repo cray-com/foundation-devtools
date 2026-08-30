@@ -5,7 +5,7 @@
 ## Installation
 
 ```bash
-npm install --save-dev https://github.com/cray-com/foundation-devtools/releases/download/v0.2.0/cray-com-foundation-devtools-0.2.0.tgz
+npm install --save-dev https://github.com/cray-com/foundation-devtools/releases/download/v0.2.1/cray-com-foundation-devtools-0.2.1.tgz
 ```
 
 ## Astro

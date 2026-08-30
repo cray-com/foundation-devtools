@@ -24,7 +24,8 @@ const styles = `
 .title { flex: 1; font-weight: 700; } button { border: 0; border-radius: 3px; padding: 4px 6px; color: inherit; background: #292e34; cursor: pointer; } .icon { background: transparent; font-size: 15px; }
 button:focus, select:focus, input:focus { outline: 2px solid #74b9ff; outline-offset: 1px; } button[aria-pressed="true"] { background: #4a5868; color: #fff; }
 .body { display: grid; gap: 8px; padding: 9px; } .compare { display: flex; gap: 3px; } .map { display: grid; gap: 2px; padding: 5px; border: 1px solid #353a40; border-radius: 4px; } .map::before { content: 'Page'; padding: 1px 3px 3px; color: #9ba3ad; text-transform: uppercase; letter-spacing: .08em; } .map button { display: flex; justify-content: space-between; gap: 8px; text-align: left; } .count { color: #9ba3ad; font-variant-numeric: tabular-nums; }
-.control { display: grid; gap: 3px; } .control.changed label::after { content: 'modified'; color: #9dbde0; font-size: 10px; } label { display: flex; justify-content: space-between; gap: 8px; color: #c8cdd3; } output { margin-left: auto; color: #fff; }
+.control { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px; } .control.changed label::after { content: 'modified'; color: #9dbde0; font-size: 10px; } .control > label { grid-column: 1; } .control > input, .control > select { grid-column: 1 / -1; } .control > [data-action='reset-control'] { grid-column: 2; grid-row: 1; padding: 0 3px; color: #9ba3ad; background: transparent; font-size: 10px; }
+label { display: flex; justify-content: space-between; gap: 8px; color: #c8cdd3; } output { margin-left: auto; color: #fff; }
 input, select { width: 100%; min-width: 0; color: #fff; background: #292e34; border: 1px solid #555b64; border-radius: 3px; padding: 3px; } input[type=checkbox] { width: auto; justify-self: start; }
 .meta, .status { padding: 7px 9px; color: #9ba3ad; border-top: 1px solid #353a40; } .status:empty { display: none; } footer { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 8px; border-top: 1px solid #353a40; } .collapsed .body, .collapsed footer, .collapsed .meta, .collapsed .status { display: none; } .hidden { display: none; }
 @media (max-width: 420px) { :host { inset: auto 6px 6px auto; } .panel { width: min(320px, calc(100vw - 12px)); max-height: calc(100vh - 12px); } }
@@ -193,7 +194,7 @@ export class FoundationDevtoolsElement extends HTMLElement {
     const row = this.row(control.label, input, `fd-label-${control.key}`, control.type === 'range' ? output : undefined);
     row.dataset.changeKey = control.key;
     row.classList.toggle('changed', Boolean(this.config && this.state && changes(this.config, this.state).changes.some((entry) => entry.key === control.key)));
-    const reset = document.createElement('button'); reset.textContent = 'Reset'; reset.dataset.action = 'reset-control'; reset.dataset.control = control.key; row.append(reset);
+    const reset = document.createElement('button'); reset.textContent = 'Reset'; reset.ariaLabel = `Reset ${control.label}`; reset.dataset.action = 'reset-control'; reset.dataset.control = control.key; row.append(reset);
     return row;
   }
 
