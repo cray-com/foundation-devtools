@@ -2,6 +2,7 @@ import {
   applyEffects,
   decodeState,
   recipe,
+  changes,
   changesJson,
   agentBrief,
   initialState,
@@ -93,8 +94,26 @@ export class FoundationDevtoolsElement extends HTMLElement {
     if (this.config.targets?.length) {
       const map = document.createElement('nav'); map.className = 'map'; map.setAttribute('aria-label', 'Targets');
       const all = ['all', ...this.config.targets.map((target) => target.key)];
-      for (const key of all) { const button = document.createElement('button'); button.textContent = key === 'all' ? 'All' : this.config.targets.find((target) => target.key === key)!.label; button.dataset.target = key; button.setAttribute('aria-pressed', String((this.selectedTarget ?? 'all') === key)); button.addEventListener('click', () => { this.selectedTarget = key === 'all' ? undefined : key; this.render(); }); map.append(button); }
+      const changed = new Set(changes(this.config, this.state).changes.map((item) => item.target).filter((key): key is string => Boolean(key)));
+      for (const key of all) {
+        const target = key === 'all' ? undefined : this.config.targets.find((item) => item.key === key);
+        const button = document.createElement('button');
+        button.textContent = `${key === 'all' ? 'All' : target!.label}${target && changed.has(key) ? ' • changed' : ''}`;
+        button.dataset.target = key;
+        button.setAttribute('aria-pressed', String((this.selectedTarget ?? 'all') === key));
+        button.addEventListener('click', () => {
+          this.selectedTarget = key === 'all' ? undefined : key;
+          if (target?.kind === 'section') {
+            const section = document.querySelector<HTMLElement>(`[data-fd-target="${CSS.escape(key)}"]`);
+            section?.scrollIntoView({ block: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+            if (section) { const previous = section.style.outline; section.style.outline = '2px solid #8f98a3'; window.setTimeout(() => { section.style.outline = previous; }, 500); }
+          }
+          this.render();
+        });
+        map.append(button);
+      }
       body.append(map);
+      if (this.selectedTarget) { const resetTarget = document.createElement('button'); resetTarget.textContent = 'Reset target'; resetTarget.dataset.action = 'reset-target'; resetTarget.dataset.control = this.selectedTarget; body.append(resetTarget); }
     }
     let rendered = 0;
     for (const family of this.config.families) {
@@ -220,6 +239,7 @@ export class FoundationDevtoolsElement extends HTMLElement {
     if (action === 'hide') this.setPanelMode('hidden');
     if (action === 'reset') { this.state = decodeState(this.config, null); this.render(); this.update(); }
     if (action === 'reset-control' && controlKey) { const control = this.config.controls?.find((item) => item.key === controlKey); if (control) { this.state.values[controlKey] = control.default; this.render(); this.update(); } }
+    if (action === 'reset-target' && controlKey) { for (const family of this.config.families.filter((item) => item.target === controlKey)) this.state.families[family.key] = family.default ?? family.variants[0].name; for (const control of this.config.controls ?? []) if (control.target === controlKey) this.state.values[control.key] = control.default; this.render(); this.update(); }
     if (action === 'changes') await this.copy(changesJson(this.config, this.state));
     if (action === 'brief') await this.copy(agentBrief(this.config, this.state));
     if (action === 'pick') { this.feedback('Pick a registered section or press Escape'); this.startPicker(); }
