@@ -39,7 +39,23 @@ Website-Markup deklariert Scopes mit `data-fd-scope`. Effects setzen ausschließ
 <section data-fd-scope="grid"><article data-fd-scope="card"></article></section>
 ```
 
-Ohne eigenen Effect werden Familien als `data-fd-variant-card="default"` auf dem gleichnamigen Scope markiert. Ein Family-Effect kann stattdessen ein vorhandenes Website-Attribut wie `data-card-variant` setzen. Ein Control-Effect mit `attribute: 'card-density'` setzt entsprechend `data-card-density`.
+Ohne eigenen Effect werden Familien als `data-fd-variant-card="default"` auf dem gleichnamigen Scope markiert.
+
+### Targets und Changes
+
+Optional ordnet `targets` Controls und Families einer Seite bzw. einem Bereich zu. Sections werden im Markup mit `data-fd-target` registriert; ungültige Zuordnungen werden verworfen. `kind: 'global'` bleibt seitenweit, `kind: 'section'` scoped auf das registrierte Element:
+
+```ts
+const config = defineDevtoolsConfig({ project: 'site', targets: [
+  { key: 'hero', label: 'Hero', kind: 'section' },
+], families: [{ key: 'card', label: 'Card', target: 'hero', variants: [{ name: 'default' }] }], controls: [{
+  type: 'select', key: 'density', label: 'Density', classification: 'token',
+  options: [{ value: 'comfortable', label: 'Comfortable' }, 'compact'], default: 'comfortable',
+  target: 'hero', effect: { scope: 'card', attribute: 'density' },
+}] });
+```
+
+`changes(config, state)` und `changesJson` liefern ausschließlich geänderte Werte gegenüber `initialState`; `agentBrief` erzeugt eine knappe Markdown-Zusammenfassung. Panel-Auswahl und Vergleichsmodus sind UI-State und werden nicht exportiert. Ein Family-Effect kann stattdessen ein vorhandenes Website-Attribut wie `data-card-variant` setzen. Ein Control-Effect mit `attribute: 'card-density'` setzt entsprechend `data-card-density`.
 
 Website-CSS kann Tailwind über semantische Layer verwenden. Dynamische Reglerwerte bleiben CSS Custom Properties:
 

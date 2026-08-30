@@ -2,6 +2,9 @@ import {
   applyEffects,
   decodeState,
   recipe,
+  changesJson,
+  agentBrief,
+  initialState,
   stateUrl,
   typescriptRecipe,
   validateConfig,
@@ -32,6 +35,8 @@ export class FoundationDevtoolsElement extends HTMLElement {
   private status?: HTMLElement;
   private storageKey = 'foundation-devtools:panel';
   private ready = false;
+  private selectedTarget: string | undefined;
+  private compareMode: 'modified' | 'original' = 'modified';
 
   connectedCallback(): void {
     if (!this.shadowRoot) this.attachShadow({ mode: 'open' });
@@ -61,12 +66,12 @@ export class FoundationDevtoolsElement extends HTMLElement {
           <button class="icon" data-action="collapse" aria-label="Panel öffnen" aria-expanded="false">+</button>
           <button class="icon" data-action="hide" aria-label="Ausblenden">×</button>
         </header><div class="body"></div><div class="meta"></div><div class="status" role="status" aria-live="polite"></div>
-        <footer><button data-action="reset">Reset</button><button data-action="permalink">Permalink</button>
+        <footer><button data-action="reset">Reset</button><button data-action="pick">Pick section</button><button data-action="changes">Copy changes</button><button data-action="brief">Copy agent brief</button><button data-action="permalink">Permalink</button>
           <button data-action="json">JSON</button><button data-action="ts">TypeScript</button><button data-action="download">Download</button></footer>
       </section>`;
     this.panel = root.querySelector('.panel')!;
     this.status = root.querySelector('.status')!;
-    root.addEventListener('click', (event) => this.action((event.target as HTMLElement).dataset.action));
+    root.addEventListener('click', (event) => { const target = event.target as HTMLElement; this.action(target.dataset.action, target.dataset.control); });
     this.ready = true;
   }
 
@@ -82,7 +87,19 @@ export class FoundationDevtoolsElement extends HTMLElement {
     if (!this.config || !this.state) return;
     const body = this.shadowRoot!.querySelector('.body')!;
     body.replaceChildren();
+    const compare = document.createElement('div'); compare.className = 'compare';
+    compare.innerHTML = '<button data-action="compare-original">Original</button><button data-action="compare-modified">Modified</button>';
+    body.append(compare);
+    if (this.config.targets?.length) {
+      const map = document.createElement('nav'); map.className = 'map'; map.setAttribute('aria-label', 'Targets');
+      const all = ['all', ...this.config.targets.map((target) => target.key)];
+      for (const key of all) { const button = document.createElement('button'); button.textContent = key === 'all' ? 'All' : this.config.targets.find((target) => target.key === key)!.label; button.dataset.target = key; button.setAttribute('aria-pressed', String((this.selectedTarget ?? 'all') === key)); button.addEventListener('click', () => { this.selectedTarget = key === 'all' ? undefined : key; this.render(); }); map.append(button); }
+      body.append(map);
+    }
+    let rendered = 0;
     for (const family of this.config.families) {
+      if (this.selectedTarget && family.target !== this.selectedTarget) continue;
+      rendered++;
       const select = document.createElement('select');
       select.id = `fd-family-${family.key}`;
       for (const variant of family.variants) select.add(new Option(variant.label ?? variant.name, variant.name));
@@ -96,7 +113,8 @@ export class FoundationDevtoolsElement extends HTMLElement {
       });
       body.append(this.row(family.label, select, `fd-family-label-${family.key}`));
     }
-    for (const control of this.config.controls ?? []) body.append(this.control(control));
+    for (const control of this.config.controls ?? []) { if (!this.selectedTarget || control.target === this.selectedTarget) { rendered++; body.append(this.control(control)); } }
+    if (this.selectedTarget && rendered === 0) { const empty = document.createElement('p'); empty.textContent = 'Keine Controls für dieses Target.'; body.append(empty); }
     const metadata = Object.entries(this.config.metadata ?? {}).map(([key, value]) => `${key}: ${value}`).join(' · ');
     this.shadowRoot!.querySelector('.meta')!.textContent = `${this.config.project}${metadata ? ` · ${metadata}` : ''}`;
   }
@@ -141,14 +159,16 @@ export class FoundationDevtoolsElement extends HTMLElement {
       });
     } else {
       const select = input as HTMLSelectElement;
-      for (const option of control.options) select.add(new Option(option, option));
+      for (const option of control.options) select.add(new Option(typeof option === 'string' ? option : option.label, typeof option === 'string' ? option : option.value));
       select.value = String(this.state!.values[control.key]);
       select.addEventListener('change', () => {
         this.state!.values[control.key] = select.value;
         this.update();
       });
     }
-    return this.row(control.label, input, `fd-label-${control.key}`, control.type === 'range' ? output : undefined);
+    const row = this.row(control.label, input, `fd-label-${control.key}`, control.type === 'range' ? output : undefined);
+    const reset = document.createElement('button'); reset.textContent = 'Reset'; reset.dataset.action = 'reset-control'; reset.dataset.control = control.key; row.append(reset);
+    return row;
   }
 
   private rangeText(control: Range, value: string): string {
@@ -182,7 +202,7 @@ export class FoundationDevtoolsElement extends HTMLElement {
     }
   }
 
-  private apply(): void { if (this.config && this.state) applyEffects(this.config, this.state); }
+  private apply(): void { if (this.config && this.state) applyEffects(this.config, this.compareMode === 'modified' ? this.state : initialState(this.config)); }
 
   private update(): void {
     if (!this.config || !this.state) return;
@@ -194,15 +214,33 @@ export class FoundationDevtoolsElement extends HTMLElement {
     }
   }
 
-  private async action(action?: string): Promise<void> {
+  private async action(action?: string, controlKey?: string): Promise<void> {
     if (!action || !this.config || !this.state) return;
     if (action === 'collapse') this.setPanelMode(this.panel?.classList.contains('collapsed') ? 'open' : 'collapsed');
     if (action === 'hide') this.setPanelMode('hidden');
     if (action === 'reset') { this.state = decodeState(this.config, null); this.render(); this.update(); }
+    if (action === 'reset-control' && controlKey) { const control = this.config.controls?.find((item) => item.key === controlKey); if (control) { this.state.values[controlKey] = control.default; this.render(); this.update(); } }
+    if (action === 'changes') await this.copy(changesJson(this.config, this.state));
+    if (action === 'brief') await this.copy(agentBrief(this.config, this.state));
+    if (action === 'pick') { this.feedback('Pick a registered section or press Escape'); this.startPicker(); }
+    if (action === 'compare-original') { this.compareMode = 'original'; this.apply(); }
+    if (action === 'compare-modified') { this.compareMode = 'modified'; this.apply(); }
     if (action === 'permalink') await this.copy(stateUrl(this.config, this.state));
     if (action === 'json') await this.copy(recipe(this.config, this.state));
     if (action === 'ts') await this.copy(typescriptRecipe(this.config, this.state));
     if (action === 'download') this.download(recipe(this.config, this.state));
+  }
+
+  private startPicker(): void {
+    if (!this.config?.targets) return;
+    const targets = this.config.targets.filter((target) => target.kind === 'section').map((target) => target.key);
+    const elements = targets.flatMap((key) => Array.from(document.querySelectorAll<HTMLElement>(`[data-fd-target="${CSS.escape(key)}"]`)));
+    const old = new Map<HTMLElement, string>();
+    const cleanup = () => { elements.forEach((element) => { element.style.outline = old.get(element) ?? ''; element.removeEventListener('click', onClick); }); document.removeEventListener('keydown', onKey); };
+    const onClick = (event: Event) => { const element = event.currentTarget as HTMLElement; event.preventDefault(); event.stopPropagation(); this.selectedTarget = element.dataset.fdTarget; cleanup(); this.render(); };
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') cleanup(); };
+    elements.forEach((element) => { old.set(element, element.style.outline); element.style.outline = '2px solid #8f98a3'; element.addEventListener('click', onClick); });
+    document.addEventListener('keydown', onKey);
   }
 
   private async copy(value: string): Promise<void> {

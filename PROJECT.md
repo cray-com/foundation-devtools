@@ -40,7 +40,8 @@ Der Astro-Adapter montiert ein browserseitiges Custom Element. Das Panel verwend
 
 V1 liefert:
 
-- Range-, Select- und Toggle-Controls;
+- Range-, Select- und Toggle-Controls; optionale Target/Page-Map-Zuordnung (`global`/`section`) und Token-/Local-Klassifikation; labeled Select-Optionen;
+- stabile Changes-/JSON-/Agent-Brief-Exporte gegenüber `initialState` (reiner Design-State, ohne Panel-UI-State);
 - benannte Variant Families mit Defaults;
 - URL-persistierten State und kopierbare Permalinks;
 - Reset, JSON-/TypeScript-Rezept, Copy und Download;
