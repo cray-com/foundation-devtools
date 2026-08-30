@@ -19,7 +19,11 @@ import { defineDevtoolsConfig } from '@cray-com/foundation-devtools'
 const config = defineDevtoolsConfig({
   project: 'astro-foundation',
   metadata: { fixture: 'listing', route: '/projects', locale: 'en' },
-  families: [{ key: 'card', label: 'Card', variants: [{ name: 'default' }, { name: 'compact' }] }],
+  families: [{
+    key: 'card', label: 'Card',
+    effect: { scope: 'card', attribute: 'card-variant' },
+    variants: [{ name: 'default' }, { name: 'compact' }],
+  }],
   controls: [{ type: 'range', key: 'grid-gap', label: 'Grid gap', min: 8, max: 48, default: 16,
     effect: { scope: 'grid', variable: '--fd-grid-gap' } }]
 })
@@ -35,7 +39,7 @@ Website-Markup deklariert Scopes mit `data-fd-scope`. Effects setzen ausschließ
 <section data-fd-scope="grid"><article data-fd-scope="card"></article></section>
 ```
 
-Familien werden konsistent als `data-fd-variant-card="default"` auf ihren Scopes markiert. Ein Attribute-Effect mit `attribute: 'card-density'` setzt entsprechend `data-card-density`.
+Ohne eigenen Effect werden Familien als `data-fd-variant-card="default"` auf dem gleichnamigen Scope markiert. Ein Family-Effect kann stattdessen ein vorhandenes Website-Attribut wie `data-card-variant` setzen. Ein Control-Effect mit `attribute: 'card-density'` setzt entsprechend `data-card-density`.
 
 Website-CSS kann Tailwind über semantische Layer verwenden. Dynamische Reglerwerte bleiben CSS Custom Properties:
 

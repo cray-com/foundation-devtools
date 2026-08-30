@@ -53,6 +53,7 @@ export type Family = {
   label: string;
   variants: readonly Variant[];
   default?: string;
+  effect?: Effect;
 };
 export type DevtoolsConfig = {
   project: string;
@@ -134,6 +135,7 @@ export function validateConfig(input: unknown): DevtoolsConfig {
         (typeof familyValue.default !== 'string' || !variantNames.has(familyValue.default))) {
       fail('family default');
     }
+    if (familyValue.effect !== undefined) validateEffect(familyValue.effect);
     families.push(familyValue as unknown as Family);
   }
 
@@ -273,9 +275,12 @@ export function applyEffects(config: DevtoolsConfig, state: DevtoolsState, root:
     }
   }
   for (const family of config.families) {
-    const selector = `[data-fd-scope="${CSS.escape(family.key)}"]`;
+    const scope = family.effect?.scope ?? family.key;
+    const selector = `[data-fd-scope="${CSS.escape(scope)}"]`;
     for (const element of Array.from(root.querySelectorAll<HTMLElement>(selector))) {
-      element.setAttribute(`data-fd-variant-${kebab(family.key)}`, state.families[family.key]);
+      if (family.effect?.variable) element.style.setProperty(family.effect.variable, state.families[family.key]);
+      else if (family.effect?.attribute) element.setAttribute(`data-${family.effect.attribute}`, state.families[family.key]);
+      else element.setAttribute(`data-fd-variant-${kebab(family.key)}`, state.families[family.key]);
     }
   }
 }

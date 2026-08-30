@@ -1,6 +1,6 @@
 {
   "name": "@cray-com/foundation-devtools",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Dense, design-neutral development tooling for website variants",
   "type": "module",
   "sideEffects": false,
