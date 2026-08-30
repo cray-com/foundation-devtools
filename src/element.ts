@@ -6,6 +6,7 @@ import {
   changesJson,
   agentBrief,
   initialState,
+  resetBaseline,
   stateUrl,
   typescriptRecipe,
   validateConfig,
@@ -38,6 +39,9 @@ export class FoundationDevtoolsElement extends HTMLElement {
   private ready = false;
   private selectedTarget: string | undefined;
   private compareMode: 'modified' | 'original' = 'modified';
+  private targetFilter = '';
+  private targetKind: 'all' | 'global' | 'section' = 'all';
+  private pickerCleanup?: () => void;
 
   connectedCallback(): void {
     if (!this.shadowRoot) this.attachShadow({ mode: 'open' });
@@ -47,6 +51,7 @@ export class FoundationDevtoolsElement extends HTMLElement {
 
   disconnectedCallback(): void {
     document.removeEventListener('keydown', this.recover);
+    this.pickerCleanup?.(); this.pickerCleanup = undefined;
   }
 
   configure(config: DevtoolsConfig): void {
@@ -93,12 +98,18 @@ export class FoundationDevtoolsElement extends HTMLElement {
     body.append(compare);
     if (this.config.targets?.length) {
       const map = document.createElement('nav'); map.className = 'map'; map.setAttribute('aria-label', 'Targets');
-      const all = ['all', ...this.config.targets.map((target) => target.key)];
-      const changed = new Set(changes(this.config, this.state).changes.map((item) => item.target).filter((key): key is string => Boolean(key)));
+      const search = document.createElement('input'); search.type = 'search'; search.placeholder = 'Filter targets'; search.value = this.targetFilter; search.setAttribute('aria-label', 'Filter targets');
+      search.addEventListener('input', () => { this.targetFilter = search.value; this.render(); }); map.append(search);
+      for (const kind of ['all', 'global', 'section'] as const) { const tab = document.createElement('button'); tab.textContent = kind[0].toUpperCase() + kind.slice(1); tab.dataset.mapKind = kind; tab.setAttribute('aria-pressed', String(this.targetKind === kind)); tab.addEventListener('click', () => { this.targetKind = kind; this.render(); }); map.append(tab); }
+      const diff = changes(this.config, this.state).changes;
+      const matches = (key: string) => { const target = this.config!.targets!.find((item) => item.key === key); return key === 'all' || (this.targetKind === 'all' || target?.kind === this.targetKind) && (!this.targetFilter || (target?.label ?? key).toLowerCase().includes(this.targetFilter.toLowerCase())); };
+      const all = ['all', ...this.config.targets.map((target) => target.key)].filter(matches);
       for (const key of all) {
         const target = key === 'all' ? undefined : this.config.targets.find((item) => item.key === key);
+        const available = key === 'all' ? this.config.families.length + (this.config.controls ?? []).length : this.config.families.filter((item) => item.target === key).length + (this.config.controls ?? []).filter((item) => item.target === key).length;
+        const changed = key === 'all' ? diff.length : diff.filter((item) => item.target === key).length;
         const button = document.createElement('button');
-        button.textContent = `${key === 'all' ? 'All' : target!.label}${target && changed.has(key) ? ' • changed' : ''}`;
+        button.textContent = `${key === 'all' ? 'All' : target!.label} (${available}/${changed})`;
         button.dataset.target = key;
         button.setAttribute('aria-pressed', String((this.selectedTarget ?? 'all') === key));
         button.addEventListener('click', () => {
@@ -114,6 +125,7 @@ export class FoundationDevtoolsElement extends HTMLElement {
       }
       body.append(map);
       if (this.selectedTarget) { const resetTarget = document.createElement('button'); resetTarget.textContent = 'Reset target'; resetTarget.dataset.action = 'reset-target'; resetTarget.dataset.control = this.selectedTarget; body.append(resetTarget); }
+      if (all.length === 0) { const empty = document.createElement('p'); empty.textContent = 'Keine Targets gefunden.'; map.append(empty); }
     }
     let rendered = 0;
     for (const family of this.config.families) {
@@ -237,18 +249,12 @@ export class FoundationDevtoolsElement extends HTMLElement {
     if (!action || !this.config || !this.state) return;
     if (action === 'collapse') this.setPanelMode(this.panel?.classList.contains('collapsed') ? 'open' : 'collapsed');
     if (action === 'hide') this.setPanelMode('hidden');
-    if (action === 'reset') { this.state = decodeState(this.config, null); this.render(); this.update(); }
-    if (action === 'reset-control' && controlKey) { const control = this.config.controls?.find((item) => item.key === controlKey); if (control) { this.state.values[controlKey] = control.default; this.render(); this.update(); } }
-    if (action === 'reset-target' && controlKey) {
-      for (const family of this.config.families.filter((item) => item.target === controlKey)) {
-        const selected = family.default ?? family.variants[0].name;
-        this.state.families[family.key] = selected;
-        const variant = family.variants.find((item) => item.name === selected);
-        Object.assign(this.state.values, variant?.defaults ?? {});
-      }
-      for (const control of this.config.controls ?? []) if (control.target === controlKey) this.state.values[control.key] = control.default;
-      this.render(); this.update();
+    if (action === 'reset') { this.state = initialState(this.config); this.render(); this.update(); }
+    if (action === 'reset-control' && controlKey) {
+      const control = this.config.controls?.find((item) => item.key === controlKey);
+      if (control) { this.state.values[controlKey] = initialState(this.config).values[controlKey]; this.render(); this.update(); }
     }
+    if (action === 'reset-target' && controlKey) { this.state = resetBaseline(this.config, this.state, controlKey); this.render(); this.update(); }
     if (action === 'changes') await this.copy(changesJson(this.config, this.state));
     if (action === 'brief') await this.copy(agentBrief(this.config, this.state));
     if (action === 'pick') { this.feedback('Pick a registered section or press Escape'); this.startPicker(); }
@@ -261,15 +267,19 @@ export class FoundationDevtoolsElement extends HTMLElement {
   }
 
   private startPicker(): void {
+    this.pickerCleanup?.();
     if (!this.config?.targets) return;
-    const targets = this.config.targets.filter((target) => target.kind === 'section').map((target) => target.key);
-    const elements = targets.flatMap((key) => Array.from(document.querySelectorAll<HTMLElement>(`[data-fd-target="${CSS.escape(key)}"]`)));
-    const old = new Map<HTMLElement, string>();
-    const cleanup = () => { elements.forEach((element) => { element.style.outline = old.get(element) ?? ''; element.removeEventListener('click', onClick); }); document.removeEventListener('keydown', onKey); };
+    const keys = this.config.targets.filter((target) => target.kind === 'section').map((target) => target.key);
+    const elements = keys.flatMap((key) => Array.from(document.querySelectorAll<HTMLElement>(`[data-fd-target="${CSS.escape(key)}"]`)));
+    const old = new Map<HTMLElement, string>(); let hovered: HTMLElement | undefined;
+    const listeners = new Map<HTMLElement, { enter: () => void; leave: () => void; focus: () => void }>();
+    const clearMark = () => { if (hovered) { hovered.style.outline = old.get(hovered) ?? ''; hovered = undefined; } };
+    const mark = (element: HTMLElement) => { clearMark(); old.set(element, element.style.outline); hovered = element; element.style.outline = '2px solid #8f98a3'; };
+    const cleanup = () => { clearMark(); elements.forEach((element) => { element.removeEventListener('click', onClick); const listener = listeners.get(element); if (listener) { element.removeEventListener('pointerenter', listener.enter); element.removeEventListener('pointerleave', listener.leave); element.removeEventListener('focus', listener.focus); } }); document.removeEventListener('keydown', onKey); this.pickerCleanup = undefined; };
     const onClick = (event: Event) => { const element = event.currentTarget as HTMLElement; event.preventDefault(); event.stopPropagation(); this.selectedTarget = element.dataset.fdTarget; cleanup(); this.render(); };
     const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') cleanup(); };
-    elements.forEach((element) => { old.set(element, element.style.outline); element.style.outline = '2px solid #8f98a3'; element.addEventListener('click', onClick); });
-    document.addEventListener('keydown', onKey);
+    elements.forEach((element) => { const enter = () => mark(element); const leave = () => { if (hovered === element) clearMark(); }; const focus = () => mark(element); listeners.set(element, { enter, leave, focus }); element.addEventListener('pointerenter', enter); element.addEventListener('pointerleave', leave); element.addEventListener('focus', focus); element.addEventListener('click', onClick); });
+    document.addEventListener('keydown', onKey); this.pickerCleanup = cleanup;
   }
 
   private async copy(value: string): Promise<void> {

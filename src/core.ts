@@ -193,7 +193,7 @@ export function validateConfig(input: unknown): DevtoolsConfig {
     } else if (controlValue.type === 'select') {
       if (!Array.isArray(controlValue.options) || controlValue.options.length === 0 ||
           controlValue.options.some((option) => (typeof option !== 'string' && !isRecord(option)) ||
-            optionValue(option as SelectOption).length === 0 || (typeof option !== 'string' && typeof option.label !== 'string')) ||
+            !isValidOption(option) || optionValue(option as SelectOption).length === 0) ||
           new Set(controlValue.options.map((option) => optionValue(option))).size !== controlValue.options.length ||
           typeof controlValue.default !== 'string' || !controlValue.options.some((option) => optionValue(option) === controlValue.default)) {
         fail('select');
@@ -217,6 +217,10 @@ export function validateConfig(input: unknown): DevtoolsConfig {
     }
   }
   return config;
+}
+
+function isValidOption(option: unknown): option is SelectOption {
+  return typeof option === 'string' ? option.length > 0 : isRecord(option) && typeof option.value === 'string' && option.value.length > 0 && typeof option.label === 'string' && option.label.length > 0;
 }
 
 function optionValue(option: SelectOption): string { return typeof option === 'string' ? option : option.value; }
@@ -370,9 +374,19 @@ export function agentBrief(config: DevtoolsConfig, state: DevtoolsState, baselin
   return `# ${config.project} changes\n\n${lines.join('\n')}`;
 }
 
-export const changesRecipe = changes;
-export const diff = changes;
-export const changesJSON = changesJson;
+/** Return a fresh state baseline; useful for scoped reset controls. */
+export function resetBaseline(config: DevtoolsConfig, state: DevtoolsState, target?: string): DevtoolsState {
+  const result = validateState(config, state);
+  const baseline = initialState(config);
+  if (!target) return baseline;
+  for (const family of config.families) if (family.target === target) {
+    result.families[family.key] = baseline.families[family.key];
+    const variant = family.variants.find((item) => item.name === baseline.families[family.key]);
+    for (const key of Object.keys(variant?.defaults ?? {})) result.values[key] = baseline.values[key];
+  }
+  for (const control of config.controls ?? []) if (control.target === target) result.values[control.key] = baseline.values[control.key];
+  return result;
+}
 
 export function recipe(config: DevtoolsConfig, state: DevtoolsState): string {
   return JSON.stringify({

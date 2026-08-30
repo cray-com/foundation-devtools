@@ -5,7 +5,7 @@
   .grid { display: grid; gap: var(--fd-gap, 1rem); }
   [data-fd-scope="card"] { color: rebeccapurple; }
 </style>
-<main class="grid" data-fd-scope="grid"><article data-fd-scope="card">Card</article><article data-fd-scope="card">Card</article></main>
+<main class="grid" data-fd-target="hero" data-fd-scope="grid"><article data-fd-scope="card">Card</article><article data-fd-scope="card">Card</article></main>
 <script type="module">
   window.addEventListener('error', (event) => { document.title = `FD error ${event.message}`; });
   import { defineDevtoolsElement } from '../dist/element.js';
@@ -13,11 +13,12 @@
   localStorage.clear();
   const config = {
     project: 'fixture',
-    families: [{ key: 'card', label: 'Card', effect: { scope: 'card', attribute: 'card-variant' }, variants: [
+    targets: [{ key: 'hero', label: 'Hero', kind: 'section' }],
+    families: [{ key: 'card', label: 'Card', target: 'hero', effect: { scope: 'card', attribute: 'card-variant' }, variants: [
       { name: 'one' }, { name: 'two', defaults: { gap: 3 } },
     ] }],
     controls: [
-      { type: 'range', key: 'gap', label: 'Gap', min: 1, max: 4, default: 2,
+      { type: 'range', key: 'gap', label: 'Gap', min: 1, max: 4, default: 2, target: 'hero',
         unit: 'rem', effect: { scope: 'grid', variable: '--fd-gap' } },
       { type: 'select', key: 'density', label: 'Density', options: ['compact', 'roomy'], default: 'compact',
         effect: { scope: 'card', attribute: 'card-density' } },
@@ -45,9 +46,11 @@
   toggle.dispatchEvent(new Event('change', { bubbles: true }));
   const card = document.querySelector('[data-fd-scope="card"]');
   const grid = document.querySelector('[data-fd-scope="grid"]');
+  const map = root.querySelector('.map');
+  const mapCounts = map && /All \(4\/2\)/.test(map.textContent) && map.textContent.includes('Global') && map.textContent.includes('Section');
   const passed = root && card.getAttribute('data-card-variant') === 'two' &&
     card.getAttribute('data-card-density') === 'roomy' && card.getAttribute('data-featured') === 'true' &&
-    grid.style.getPropertyValue('--fd-gap') === '4rem' &&
+    grid.style.getPropertyValue('--fd-gap') === '4rem' && mapCounts &&
     new URL(location.href).searchParams.has('fd');
   root.querySelector('[data-action="hide"]').click();
   const hidden = root.querySelector('.panel').classList.contains('hidden');
@@ -56,10 +59,23 @@
     root.querySelector('.panel').classList.contains('collapsed');
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', ctrlKey: true, shiftKey: true }));
   const shortcutOpened = !root.querySelector('.panel').classList.contains('collapsed');
+  root.querySelector('[data-action="changes"]').click();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const copiedChanges = ['Copied', 'Copy unavailable'].includes(root.querySelector('.status').textContent);
+  root.querySelector('[data-action="compare-original"]').click();
+  const originalApplied = grid.style.getPropertyValue('--fd-gap') === '2rem';
+  root.querySelector('[data-action="compare-modified"]').click();
+  const modifiedRestored = grid.style.getPropertyValue('--fd-gap') === '4rem';
+  root.querySelector('[data-action="pick"]').click();
+  const hero = document.querySelector('[data-fd-target="hero"]');
+  hero.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }));
+  const marked = hero.style.outline !== '';
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  const cleaned = hero.style.outline === '';
   root.querySelector('[data-action="json"]').click();
   range.focus();
   await new Promise((resolve) => setTimeout(resolve, 50));
   const feedback = ['Copied', 'Copy unavailable'].includes(root.querySelector('.status').textContent);
-  document.title = passed && initiallyCollapsed && opened && hidden && restoredCollapsed && shortcutOpened && feedback
+  document.title = passed && initiallyCollapsed && opened && hidden && restoredCollapsed && shortcutOpened && feedback && copiedChanges && originalApplied && modifiedRestored && marked && cleaned
     ? 'FD browser PASS' : 'FD browser FAIL';
 </script>
