@@ -260,8 +260,8 @@ export class FoundationDevtoolsElement extends HTMLElement {
     if (action === 'changes') await this.copy(changesJson(this.config, this.state));
     if (action === 'brief') await this.copy(agentBrief(this.config, this.state));
     if (action === 'pick') { this.feedback('Pick a registered section or press Escape'); this.startPicker(); }
-    if (action === 'compare-original') { this.compareMode = 'original'; this.apply(); }
-    if (action === 'compare-modified') { this.compareMode = 'modified'; this.apply(); }
+    if (action === 'compare-original') { this.compareMode = 'original'; this.render(); this.apply(); }
+    if (action === 'compare-modified') { this.compareMode = 'modified'; this.render(); this.apply(); }
     if (action === 'permalink') await this.copy(stateUrl(this.config, this.state));
     if (action === 'json') await this.copy(recipe(this.config, this.state));
     if (action === 'ts') await this.copy(typescriptRecipe(this.config, this.state));
