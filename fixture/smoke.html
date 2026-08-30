@@ -1,0 +1,65 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>FD smoke</title>
+<style>
+  .grid { display: grid; gap: var(--fd-gap, 1rem); }
+  [data-fd-scope="card"] { color: rebeccapurple; }
+</style>
+<main class="grid" data-fd-scope="grid"><article data-fd-scope="card">Card</article><article data-fd-scope="card">Card</article></main>
+<script type="module">
+  window.addEventListener('error', (event) => { document.title = `FD error ${event.message}`; });
+  import { defineDevtoolsElement } from '../dist/element.js';
+
+  localStorage.clear();
+  const config = {
+    project: 'fixture',
+    families: [{ key: 'card', label: 'Card', variants: [
+      { name: 'one' }, { name: 'two', defaults: { gap: 3 } },
+    ] }],
+    controls: [
+      { type: 'range', key: 'gap', label: 'Gap', min: 1, max: 4, default: 2,
+        unit: 'rem', effect: { scope: 'grid', variable: '--fd-gap' } },
+      { type: 'select', key: 'density', label: 'Density', options: ['compact', 'roomy'], default: 'compact',
+        effect: { scope: 'card', attribute: 'card-density' } },
+      { type: 'toggle', key: 'featured', label: 'Featured', default: false,
+        effect: { scope: 'card', attribute: 'featured' } },
+    ],
+  };
+  const element = defineDevtoolsElement(config);
+  document.body.append(element);
+  await new Promise((resolve) => queueMicrotask(resolve));
+  const root = element.shadowRoot;
+  const [variant, density] = root.querySelectorAll('select');
+  const range = root.querySelector('input[type="range"]');
+  const toggle = root.querySelector('input[type="checkbox"]');
+  const initiallyCollapsed = root.querySelector('.panel').classList.contains('collapsed');
+  root.querySelector('[data-action="collapse"]').click();
+  const opened = !root.querySelector('.panel').classList.contains('collapsed');
+  variant.value = 'two';
+  variant.dispatchEvent(new Event('change', { bubbles: true }));
+  range.value = '4';
+  range.dispatchEvent(new Event('input', { bubbles: true }));
+  density.value = 'roomy';
+  density.dispatchEvent(new Event('change', { bubbles: true }));
+  toggle.checked = true;
+  toggle.dispatchEvent(new Event('change', { bubbles: true }));
+  const card = document.querySelector('[data-fd-scope="card"]');
+  const grid = document.querySelector('[data-fd-scope="grid"]');
+  const passed = root && card.getAttribute('data-fd-variant-card') === 'two' &&
+    card.getAttribute('data-card-density') === 'roomy' && card.getAttribute('data-featured') === 'true' &&
+    grid.style.getPropertyValue('--fd-gap') === '4rem' &&
+    new URL(location.href).searchParams.has('fd');
+  root.querySelector('[data-action="hide"]').click();
+  const hidden = root.querySelector('.panel').classList.contains('hidden');
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', ctrlKey: true, shiftKey: true }));
+  const restoredCollapsed = !root.querySelector('.panel').classList.contains('hidden') &&
+    root.querySelector('.panel').classList.contains('collapsed');
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', ctrlKey: true, shiftKey: true }));
+  const shortcutOpened = !root.querySelector('.panel').classList.contains('collapsed');
+  root.querySelector('[data-action="json"]').click();
+  range.focus();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const feedback = ['Copied', 'Copy unavailable'].includes(root.querySelector('.status').textContent);
+  document.title = passed && initiallyCollapsed && opened && hidden && restoredCollapsed && shortcutOpened && feedback
+    ? 'FD browser PASS' : 'FD browser FAIL';
+</script>
