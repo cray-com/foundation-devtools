@@ -239,7 +239,16 @@ export class FoundationDevtoolsElement extends HTMLElement {
     if (action === 'hide') this.setPanelMode('hidden');
     if (action === 'reset') { this.state = decodeState(this.config, null); this.render(); this.update(); }
     if (action === 'reset-control' && controlKey) { const control = this.config.controls?.find((item) => item.key === controlKey); if (control) { this.state.values[controlKey] = control.default; this.render(); this.update(); } }
-    if (action === 'reset-target' && controlKey) { for (const family of this.config.families.filter((item) => item.target === controlKey)) this.state.families[family.key] = family.default ?? family.variants[0].name; for (const control of this.config.controls ?? []) if (control.target === controlKey) this.state.values[control.key] = control.default; this.render(); this.update(); }
+    if (action === 'reset-target' && controlKey) {
+      for (const family of this.config.families.filter((item) => item.target === controlKey)) {
+        const selected = family.default ?? family.variants[0].name;
+        this.state.families[family.key] = selected;
+        const variant = family.variants.find((item) => item.name === selected);
+        Object.assign(this.state.values, variant?.defaults ?? {});
+      }
+      for (const control of this.config.controls ?? []) if (control.target === controlKey) this.state.values[control.key] = control.default;
+      this.render(); this.update();
+    }
     if (action === 'changes') await this.copy(changesJson(this.config, this.state));
     if (action === 'brief') await this.copy(agentBrief(this.config, this.state));
     if (action === 'pick') { this.feedback('Pick a registered section or press Escape'); this.startPicker(); }

@@ -297,7 +297,8 @@ function scopedElements(root: ParentNode, scope: string, target?: string, target
   const base = target && targetDefinition?.kind === 'section' ? root.querySelector<HTMLElement>(`[data-fd-target="${CSS.escape(target)}"]`) : root;
   if (!base) return [];
   const selector = `[data-fd-scope="${CSS.escape(scope)}"]`;
-  return Array.from(base.querySelectorAll<HTMLElement>(selector));
+  const descendants = Array.from(base.querySelectorAll<HTMLElement>(selector));
+  return base instanceof HTMLElement && base.matches(selector) ? [base, ...descendants] : descendants;
 }
 
 export function applyEffects(config: DevtoolsConfig, state: DevtoolsState, root: ParentNode = document): void {
