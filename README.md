@@ -5,7 +5,7 @@
 ## Installation
 
 ```bash
-npm install --save-dev https://github.com/cray-com/foundation-devtools/releases/download/v0.1.1/cray-com-foundation-devtools-0.1.1.tgz
+npm install --save-dev https://github.com/cray-com/foundation-devtools/releases/download/v0.2.0/cray-com-foundation-devtools-0.2.0.tgz
 ```
 
 ## Astro
@@ -39,7 +39,23 @@ Website-Markup deklariert Scopes mit `data-fd-scope`. Effects setzen ausschließ
 <section data-fd-scope="grid"><article data-fd-scope="card"></article></section>
 ```
 
-Ohne eigenen Effect werden Familien als `data-fd-variant-card="default"` auf dem gleichnamigen Scope markiert. Ein Family-Effect kann stattdessen ein vorhandenes Website-Attribut wie `data-card-variant` setzen. Ein Control-Effect mit `attribute: 'card-density'` setzt entsprechend `data-card-density`.
+Ohne eigenen Effect werden Familien als `data-fd-variant-card="default"` auf dem gleichnamigen Scope markiert.
+
+### Targets und Changes
+
+Optional ordnet `targets` Controls und Families einer Seite bzw. einem Bereich zu. Sections werden im Markup mit `data-fd-target` registriert; ungültige Zuordnungen werden verworfen. `kind: 'global'` bleibt seitenweit, `kind: 'section'` scoped auf das registrierte Element:
+
+```ts
+const config = defineDevtoolsConfig({ project: 'site', targets: [
+  { key: 'hero', label: 'Hero', kind: 'section' },
+], families: [{ key: 'card', label: 'Card', target: 'hero', variants: [{ name: 'default' }] }], controls: [{
+  type: 'select', key: 'density', label: 'Density', classification: 'token',
+  options: [{ value: 'comfortable', label: 'Comfortable' }, 'compact'], default: 'comfortable',
+  target: 'hero', effect: { scope: 'card', attribute: 'density' },
+}] });
+```
+
+`changes(config, state)` und `changesJson` liefern ausschließlich geänderte Werte gegenüber `initialState`; `agentBrief` erzeugt eine knappe Markdown-Zusammenfassung. Panel-Auswahl und Vergleichsmodus sind UI-State und werden nicht exportiert. Ein Family-Effect kann stattdessen ein vorhandenes Website-Attribut wie `data-card-variant` setzen. Ein Control-Effect mit `attribute: 'card-density'` setzt entsprechend `data-card-density`.
 
 Website-CSS kann Tailwind über semantische Layer verwenden. Dynamische Reglerwerte bleiben CSS Custom Properties:
 
@@ -62,7 +78,7 @@ Website-CSS kann Tailwind über semantische Layer verwenden. Dynamische Reglerwe
 
 ## Öffentliche Schnittstelle
 
-`DevtoolsConfig`, `Metadata`, `Family`, `Variant`, `Range`, `Select`, `Toggle`, `DevtoolsState` sowie `defineDevtoolsConfig`, `validateConfig`, `initialState`, `validateState`, `encodeState`, `decodeState`, `stateUrl`, `applyEffects`, `recipe` und `typescriptRecipe` sind serialisierbar bzw. strict typisiert. Ungültige URL-Werte werden verworfen (fail-closed).
+`DevtoolsConfig`, `Metadata`, `Target`, `Family`, `Variant`, `Range`, `Select`, `SelectOption`, `Toggle`, `DevtoolsState` sowie `defineDevtoolsConfig`, `validateConfig`, `initialState`, `validateState`, `encodeState`, `decodeState`, `stateUrl`, `applyEffects`, `changes`, `changesJson`, `agentBrief`, `resetBaseline`, `recipe` und `typescriptRecipe` sind serialisierbar bzw. strict typisiert. Nicht-kanonische Alias-Exporte werden nicht angeboten. Ungültige URL-Werte werden verworfen (fail-closed).
 
 Das Panel startet platzsparend eingeklappt. Es bietet Reset, Permalink-, JSON- und TypeScript-Copy sowie JSON-Download. Es ist vollständig ausblendbar und per Cmd/Ctrl+Shift+D wiederherstellbar beziehungsweise umschaltbar. Tastaturfokus und Reduced Motion werden berücksichtigt. URL-State verwendet nur den Parameter `fd` und erhält vorhandene Parameter.
 
