@@ -494,17 +494,58 @@ export function safeRoute(value: string): string {
 function cssIdent(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, (char) => `\\${char.charCodeAt(0).toString(16)} `);
 }
-/** Stable, bounded selector used for handoff; it never includes text or form values. */
-export function domPath(element: Element, limit = 8): string {
-  const parts: string[] = []; let current: Element | null = element;
-  while (current && parts.length < limit && current.nodeType === 1) {
-    let part = current.tagName.toLowerCase();
-    const id = current.getAttribute('id');
-    if (id && /^[a-zA-Z][\\w-]{0,63}$/.test(id)) part += `#${cssIdent(id)}`;
-    else { const scope = current.getAttribute('data-fd-scope'); if (scope && scopePattern.test(scope)) part += `[data-fd-scope="${scope}"]`; }
-    parts.unshift(part); current = current.parentElement ?? ((current.getRootNode() as ShadowRoot).host ?? null);
+const safeDomId = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+function rootOf(element: Element): Document | ShadowRoot { return element.getRootNode() as Document | ShadowRoot; }
+function uniqueId(element: Element, id: string): boolean {
+  if (!safeDomId.test(id)) return false;
+  try { return rootOf(element).querySelectorAll(`#${cssIdent(id)}`).length === 1; } catch { return false; }
+}
+function elementSegment(element: Element, root: Document | ShadowRoot): string {
+  const tag = element.tagName.toLowerCase(); const id = element.getAttribute('id');
+  if (id && uniqueId(element, id)) return `${tag}#${cssIdent(id)}`;
+  const parent: Element | null = element.parentElement;
+  const siblings = parent
+    ? Array.from(parent.children).filter((child) => child.tagName === element.tagName)
+    : Array.from(root.children).filter((child) => child.tagName === element.tagName);
+  return `${tag}:nth-of-type(${Math.max(1, siblings.indexOf(element) + 1)})`;
+}
+/** Element-exact, bounded path. ` >>> ` is an explicit open ShadowRoot boundary. */
+export function domPath(element: Element, limit = 32): string {
+  const parts: string[] = []; let current: Element | null = element; let root = rootOf(element);
+  while (current && parts.length < Math.max(1, limit) && current.nodeType === 1) {
+    parts.unshift(elementSegment(current, root));
+    const parent: Element | null = current.parentElement;
+    if (parent) current = parent;
+    else {
+      const shadow = root as ShadowRoot;
+      const host = shadow.host;
+      if (host) { parts.unshift('>>>'); current = host; root = rootOf(host); }
+      else current = null;
+    }
   }
-  return parts.join(' > ').slice(0, 512);
+  return parts.join(' > ').replace(/ > >>> > /g, ' >>> ').slice(0, 512);
+}
+/** Resolve a domPath, including its explicit open-shadow boundaries. */
+export function resolvePath(path: string, root: Document | ShadowRoot = document): Element | undefined {
+  if (typeof path !== 'string' || path.length === 0 || path.length > 512) return undefined;
+  let currentRoot: Document | ShadowRoot = root; let value = path;
+  try {
+    const chunks = value.split(' >>> ');
+    for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
+      const segments = chunks[chunkIndex].split(' > ');
+      let current: Element | null = null;
+      for (const segment of segments) {
+        if (!segment || segment === '>>>') return undefined;
+        current = current ? current.querySelector(segment) : currentRoot.querySelector(segment);
+        if (!current) return undefined;
+      }
+      if (chunkIndex < chunks.length - 1) {
+        if (!current?.shadowRoot) return undefined;
+        currentRoot = current.shadowRoot;
+      } else return current ?? undefined;
+    }
+  } catch { return undefined; }
+  return undefined;
 }
 function dataAncestor(element: Element, name: string): string | undefined {
   let current: Element | null = element;

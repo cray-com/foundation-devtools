@@ -4,6 +4,8 @@
 <style>
   .grid { display: grid; gap: var(--fd-gap, 1rem); }
   [data-fd-scope="card"] { color: rebeccapurple; }
+  @keyframes smoke-spin { from { opacity: .2; } to { opacity: .8; } }
+  .motion-test { animation: smoke-spin 10s linear infinite; transition: opacity 10s linear; }
 </style>
 <main class="grid" data-fd-target="hero" data-fd-scope="grid"><article data-fd-scope="card">Card</article><article data-fd-scope="card">Card</article></main>
 <aside data-fd-target="hero" data-fd-scope="grid">Second registered hero target</aside>
@@ -11,7 +13,7 @@
 <script type="module">
   window.addEventListener('error', (event) => { document.title = `FD error ${event.message}`; });
   import { defineDevtoolsElement } from '../dist/element.js';
-  import { applyEffects, initialState } from '../dist/core.js';
+  import { applyEffects, initialState, domPath, resolvePath } from '../dist/core.js';
 
   localStorage.clear();
   const config = {
@@ -33,7 +35,15 @@
   };
   const shadowHost = document.querySelector('#shadow-host');
   const shadow = shadowHost.attachShadow({ mode: 'open' });
-  shadow.innerHTML = '<section data-fd-target="shadow" data-fd-scope="grid"><button>Shadow target</button></section>';
+  shadow.innerHTML = '<style>@keyframes shadow-spin { from { opacity: .1; } to { opacity: .9; } } .motion-test { animation: shadow-spin 10s linear infinite; transition: opacity 10s linear; }</style><section data-fd-target="shadow" data-fd-scope="grid"><button>Shadow target</button></section>';
+  const motion = document.createElement('div'); motion.className = 'motion-test'; document.body.append(motion);
+  const shadowMotion = shadow.querySelector('section'); shadowMotion.classList.add('motion-test');
+  const firstCard = document.querySelectorAll('[data-fd-scope="card"]')[0]; const secondCard = document.querySelectorAll('[data-fd-scope="card"]')[1];
+  firstCard.id = 'safe-card'; secondCard.id = 'bad id';
+  const duplicate = document.createElement('article'); duplicate.id = 'safe-card'; duplicate.setAttribute('data-fd-scope', 'card'); document.querySelector('main').append(duplicate);
+  const pathChecks = domPath(firstCard).includes(':nth-of-type(1)') && !domPath(secondCard).includes('#bad') && domPath(secondCard).includes(':nth-of-type(2)') &&
+    resolvePath(domPath(firstCard)) === firstCard && resolvePath(domPath(secondCard)) === secondCard && domPath(shadow.querySelector('button')).includes(' >>> ') && resolvePath(domPath(shadow.querySelector('button'))) === shadow.querySelector('button');
+  duplicate.remove(); firstCard.id = ''; secondCard.id = '';
   config.targets.push({ key: 'shadow', label: 'Shadow', kind: 'section' });
   const element = defineDevtoolsElement(config);
   document.body.append(element);
@@ -117,9 +127,9 @@
   const pickerSuspended = hero.style.outline === '';
   document.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true }));
   hero.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }));
-  const pickerResumed = hero.style.outline !== '';
+  const pickerResumed = hero.style.outline !== '' && Boolean(document.querySelector('[data-fd-picker-label]')) && getComputedStyle(document.querySelector('[data-fd-picker-label]')).pointerEvents === 'none';
   hero.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }));
-  const marked = hero.style.outline !== '';
+  const marked = hero.style.outline !== '' && Boolean(document.querySelector('[data-fd-picker-label]'));
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
   const cleaned = hero.style.outline === '' && !hero.hasAttribute('tabindex');
   root.querySelector('[data-action="pick"]').click();
@@ -164,22 +174,19 @@
   const edgeSnap = panel.style.left === '0px' && panel.getBoundingClientRect().top >= 0;
 
   const running = document.createElement('video'); const paused = document.createElement('video');
-  let runningPaused = false; let runningPlayed = false; let pausedPlayed = false;
-  Object.defineProperty(running, 'paused', { get: () => runningPaused });
-  Object.defineProperty(paused, 'paused', { get: () => true });
-  running.pause = () => { runningPaused = true; }; running.play = () => { runningPlayed = true; runningPaused = false; return Promise.resolve(); };
-  paused.play = () => { pausedPlayed = true; return Promise.resolve(); };
-  document.body.append(running, paused);
+  document.body.append(running, paused); const runningBefore = { currentTime: running.currentTime, paused: running.paused }; const pausedBefore = { currentTime: paused.currentTime, paused: paused.paused };
   root.querySelector('[data-action="freeze"]').click();
-  const frozenVideos = runningPaused && !pausedPlayed;
-  paused.remove();
+  const documentFreeze = getComputedStyle(motion).animationPlayState === 'paused' && getComputedStyle(motion).transitionProperty === 'none';
+  const shadowFreeze = getComputedStyle(shadowMotion).animationPlayState === 'paused' && getComputedStyle(shadowMotion).transitionProperty === 'none' && Boolean(shadow.querySelector('style[data-fd-freeze]')) && Boolean(document.querySelector('style[data-fd-freeze]'));
+  const frozenVideoState = running.paused === runningBefore.paused && running.currentTime === runningBefore.currentTime && paused.paused === pausedBefore.paused && paused.currentTime === pausedBefore.currentTime;
   root.querySelector('[data-action="freeze"]').click();
-  const videoState = frozenVideos && runningPlayed;
-  running.remove();
+  const restoredMotion = getComputedStyle(motion).animationPlayState !== 'paused' && getComputedStyle(motion).transitionProperty !== 'none' && !shadow.querySelector('style[data-fd-freeze]') && !document.querySelector('style[data-fd-freeze]');
+  const videoState = frozenVideoState && running.paused === runningBefore.paused && running.currentTime === runningBefore.currentTime && paused.paused === pausedBefore.paused && paused.currentTime === pausedBefore.currentTime;
+  running.remove(); paused.remove();
   panel.style.left = '9999px'; panel.style.top = '9999px'; window.dispatchEvent(new Event('resize'));
   const resizeClamped = panel.getBoundingClientRect().right <= innerWidth && panel.getBoundingClientRect().bottom <= innerHeight;
   document.title = passed && initiallyOpen && collapsed && opened && hidden && hideNotPersisted && restoredCollapsed && shortcutOpened && shadowRevealed && feedback && copiedChanges && copiedBrief && originalApplied && modifiedRestored && emptyTarget && controlReset && marked && pickerSuspended && pickerResumed && cleaned && picked && shiftTwoFocused && targetReset && fullReset
-    && groupedHistory && redoneHistory && videoState && edgeSnap && resizeClamped
+    && groupedHistory && redoneHistory && videoState && documentFreeze && shadowFreeze && restoredMotion && pathChecks && edgeSnap && resizeClamped
     && inspectMapWithoutSelection && browserShortcutIgnored && shortcutTabPersisted && inspectCopyActions && inspectCopied
     ? 'FD browser PASS' : 'FD browser FAIL';
 </script>

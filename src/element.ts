@@ -57,8 +57,9 @@ export class FoundationDevtoolsElement extends HTMLElement {
   private editingControl = false;
   private controlInteractionStart?: DevtoolsState;
   private pickerSuspended = false;
+  private pickerClearMark?: () => void;
   private frozen = false;
-  private frozenVideos: Array<{ video: HTMLVideoElement; currentTime: number }> = [];
+  private frozenVideos: Array<{ video: HTMLVideoElement; currentTime: number; paused: boolean }> = [];
   private freezeStyles: HTMLStyleElement[] = [];
   private restoredSelection?: Annotation;
 
@@ -143,6 +144,7 @@ export class FoundationDevtoolsElement extends HTMLElement {
     } else if (noModifiers && event.key === ' ' && this.pickerCleanup) {
       event.preventDefault();
       this.pickerSuspended = true;
+      this.pickerClearMark?.();
     } else if (noModifiers && (event.key === '1' || event.key === '2' || event.key === '3')) { this.setActiveTab(({ '1': 'inspect', '2': 'compose', '3': 'changes' } as const)[event.key]); }
     else if (noModifiers && event.key.toLowerCase() === 'i') this.startPicker();
     else if (noModifiers && event.key.toLowerCase() === 'v') this.pickerCleanup?.();
@@ -462,9 +464,24 @@ export class FoundationDevtoolsElement extends HTMLElement {
     const oldOutline = new Map<HTMLElement, string>();
     const oldTabIndex = new Map<HTMLElement, string | null>();
     let hovered: HTMLElement | undefined;
+    let label: HTMLDivElement | undefined;
     const listeners = new Map<HTMLElement, { enter: () => void; leave: () => void; focus: () => void; key: (event: KeyboardEvent) => void }>();
-    const clearMark = () => { if (hovered) { hovered.style.outline = oldOutline.get(hovered) ?? ''; hovered = undefined; } };
-    const mark = (element: HTMLElement) => { if (this.pickerSuspended) return; clearMark(); oldOutline.set(element, element.style.outline); hovered = element; element.style.outline = '2px solid #8f98a3'; };
+    const clearLabel = () => { label?.remove(); label = undefined; };
+    const clearMark = () => { if (hovered) { hovered.style.outline = oldOutline.get(hovered) ?? ''; hovered = undefined; } clearLabel(); };
+    this.pickerClearMark = clearMark;
+    const mark = (element: HTMLElement) => {
+      if (this.pickerSuspended) return;
+      clearMark(); oldOutline.set(element, element.style.outline); hovered = element; element.style.outline = '2px solid #8f98a3';
+      const context = this.contextFor(element); const contextText = context.component ?? context.scope ?? context.target;
+      label = document.createElement('div'); label.dataset.fdPickerLabel = 'true'; label.setAttribute('aria-hidden', 'true');
+      label.textContent = `<${element.tagName.toLowerCase()}>${contextText ? ` · ${contextText.slice(0, 64)}` : ''}`;
+      Object.assign(label.style, { position: 'fixed', zIndex: '2147483646', pointerEvents: 'none', padding: '2px 5px', border: '1px solid #8f98a3', borderRadius: '3px', background: '#17191c', color: '#fff', font: '11px/1.2 ui-monospace, monospace', whiteSpace: 'nowrap', maxWidth: 'min(280px, calc(100vw - 12px))', overflow: 'hidden', textOverflow: 'ellipsis' });
+      (document.body ?? document.documentElement).append(label);
+      const rect = element.getBoundingClientRect(); const labelRect = label.getBoundingClientRect();
+      const left = Math.max(6, Math.min(rect.left, innerWidth - labelRect.width - 6));
+      const top = Math.max(6, Math.min(rect.top - labelRect.height - 4, innerHeight - labelRect.height - 6));
+      label.style.left = `${left}px`; label.style.top = `${top}px`;
+    };
     const select = (element: HTMLElement, event: Event) => {
       if (this.pickerSuspended) return;
       event.preventDefault(); event.stopImmediatePropagation(); this.selected = element; this.restoredSelection = annotationFor(element, this.config, this.intent); this.selectedTarget = this.dataAncestor(element, 'data-fd-target'); if ((event as MouseEvent).shiftKey && this.annotations.length < 8) this.annotations.push(annotationFor(element, this.config, this.intent)); else { cleanup(); this.render(); } };
@@ -482,11 +499,12 @@ export class FoundationDevtoolsElement extends HTMLElement {
       });
       document.removeEventListener('keydown', onDocumentKey);
       this.pickerCleanup = undefined;
+      this.pickerClearMark = undefined;
     };
     const onClick = (event: Event) => select(event.currentTarget as HTMLElement, event);
     const onDocumentKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') cleanup();
-      else if (event.key === ' ') { event.preventDefault(); this.pickerSuspended = true; }
+      else if (event.key === ' ') { event.preventDefault(); this.pickerSuspended = true; clearMark(); }
     };
     const onDocumentKeyup = (event: KeyboardEvent) => { if (event.key === ' ') { event.preventDefault(); this.pickerSuspended = false; } };
     const onBlur = () => { this.pickerSuspended = false; cleanup(); };
@@ -495,7 +513,7 @@ export class FoundationDevtoolsElement extends HTMLElement {
       const leave = () => { if (hovered === element) clearMark(); };
       const focus = () => mark(element);
       const key = (event: KeyboardEvent) => {
-        if (event.key === ' ') { event.preventDefault(); this.pickerSuspended = true; return; }
+        if (event.key === ' ') { event.preventDefault(); this.pickerSuspended = true; clearMark(); return; }
         if (event.key === 'Enter') select(element, event);
       };
       listeners.set(element, { enter, leave, focus, key });
@@ -552,18 +570,18 @@ export class FoundationDevtoolsElement extends HTMLElement {
   }
   private undo(): void { if (!this.state || !this.history.length) return; this.future.push(structuredClone(this.state)); this.state = this.history.pop()!; this.render(); this.update(); }
   private redo(): void { if (!this.state || !this.future.length) return; this.history.push(structuredClone(this.state)); this.state = this.future.pop()!; this.render(); this.update(); }
-  private resumeVideo(entry: { video: HTMLVideoElement; currentTime: number }): void {
+  private resumeVideo(entry: { video: HTMLVideoElement; currentTime: number; paused: boolean }): void {
     const { video } = entry;
     if (!video.isConnected) return;
     try { video.currentTime = entry.currentTime; } catch { /* Media may have been detached or failed. */ }
-    void video.play().catch(() => { /* Autoplay/media failures must not break unfreeze. */ });
+    if (!entry.paused) void video.play().catch(() => { /* Autoplay/media failures must not break unfreeze. */ });
   }
   private toggleFreeze(): void { this.frozen ? this.unfreezeMotion() : this.freezeMotion(); }
   private freezeMotion(): void {
     this.frozen = true;
     this.frozenVideos = this.traverseOpenRoots(document).flatMap((element) => {
       if (!(element instanceof HTMLVideoElement) || this.isToolElement(element)) return [];
-      try { if (element.paused) return []; const currentTime = Number.isFinite(element.currentTime) ? element.currentTime : 0; element.pause(); return [{ video: element, currentTime }]; } catch { return []; }
+      try { const paused = element.paused; const currentTime = Number.isFinite(element.currentTime) ? element.currentTime : 0; if (!paused) element.pause(); return [{ video: element, currentTime, paused }]; } catch { return []; }
     });
     this.freezeStyles = [];
     const css = '*,*::before,*::after{animation-play-state:paused!important;transition:none!important}';

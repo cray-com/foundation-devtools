@@ -16,10 +16,10 @@ test('Astro fixture covers production and browser contracts', async () => {
     let browser;
     try { browser = await launcher.launch({ ...options, headless: true }); } catch (error) { throw new Error(`${name} smoke could not start`, { cause: error }); }
     try {
-      const context = await browser.newContext({ reducedMotion: 'reduce' });
+      const context = await browser.newContext({ reducedMotion: 'no-preference' });
       const page = await context.newPage();
       await page.goto(pathToFileURL(`${process.cwd()}/fixture/smoke.html`).href, { waitUntil: 'load' });
-      await page.waitForFunction(() => document.title === 'FD browser PASS', undefined, { timeout: 10_000 });
+      await page.waitForFunction(() => document.title.startsWith('FD browser '), undefined, { timeout: 20_000 });
       assert.equal(await page.title(), 'FD browser PASS');
       const panel = page.locator('foundation-devtools').locator('.panel');
       assert.ok(await panel.boundingBox());
