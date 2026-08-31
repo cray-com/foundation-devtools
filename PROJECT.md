@@ -63,6 +63,10 @@ Erster realer Adapter ist das Project-Listing in `astro-foundation` mit Controls
 - visuelle Website-Komponenten oder Design Tokens;
 - ein eigenes UI-Framework.
 
+## V1 DOM-Inspector und Layouting
+
+Das Tool bietet drei getrennte Ansichten (`Inspect`, `Compose`, `Changes`). Inspect erlaubt einen freien, sicheren DOM-Picker mit Breadcrumb-/Parent-/Child-Navigation, registriertem Component-/Scope-Kontext und read-only Layout-Fakten. Compose verwendet ausschließlich explizit registrierte Website-Recipes. Changes exportiert nur Design-Diffs und begrenzte Annotationen/Intent als Agent-Brief. Auswahl- und Panel-Zustand bleiben aus Design-State und Recipes ausgeschlossen. Picker, Annotationen, Freeze Motion, Undo/Redo und Handoff schreiben keine Quelldateien.
+
 ## Aktueller Fokus
 
 1. Das öffentliche Paket und seine kleine Konfigurationsschnittstelle liefern.

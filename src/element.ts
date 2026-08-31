@@ -10,6 +10,10 @@ import {
   stateUrl,
   typescriptRecipe,
   validateConfig,
+  annotationFor,
+  layoutFacts,
+  handoff,
+  type Annotation,
   type Control,
   type DevtoolsConfig,
   type DevtoolsState,
@@ -20,7 +24,7 @@ const styles = `
 :host { all: initial; position: fixed; inset: auto 12px 12px auto; z-index: 2147483647; color: #e9edf2; font: 12px/1.3 ui-monospace, SFMono-Regular, monospace; }
 * { box-sizing: border-box; }
 .panel { width: min(360px, calc(100vw - 24px)); max-height: min(760px, calc(100vh - 24px)); overflow: auto; background: #17191c; border: 1px solid #454a51; border-radius: 6px; box-shadow: 0 5px 24px #0008; }
-.bar { display: flex; align-items: center; gap: 6px; padding: 5px 7px; background: #22262a; position: sticky; top: 0; }
+.bar { display: flex; align-items: center; gap: 6px; padding: 5px 7px; background: #22262a; position: sticky; top: 0; } .tabs { display:flex; gap:2px; padding:4px 7px; border-bottom:1px solid #353a40; } .tabs button { flex:1; }
 .title { flex: 1; font-weight: 700; } button { border: 0; border-radius: 3px; padding: 4px 6px; color: inherit; background: #292e34; cursor: pointer; } .icon { background: transparent; font-size: 15px; }
 button:focus, select:focus, input:focus { outline: 2px solid #74b9ff; outline-offset: 1px; } button[aria-pressed="true"] { background: #4a5868; color: #fff; }
 .body { display: grid; gap: 8px; padding: 9px; } .compare { display: flex; gap: 3px; } .map { display: grid; gap: 2px; padding: 5px; border: 1px solid #353a40; border-radius: 4px; } .map::before { content: 'Page'; padding: 1px 3px 3px; color: #9ba3ad; text-transform: uppercase; letter-spacing: .08em; } .map button { display: flex; justify-content: space-between; gap: 8px; text-align: left; } .count { color: #9ba3ad; font-variant-numeric: tabular-nums; }
@@ -29,7 +33,7 @@ label { display: flex; justify-content: space-between; gap: 8px; color: #c8cdd3;
 input, select { width: 100%; min-width: 0; color: #fff; background: #292e34; border: 1px solid #555b64; border-radius: 3px; padding: 3px; } input[type=checkbox] { width: auto; justify-self: start; }
 .meta, .status { padding: 7px 9px; color: #9ba3ad; border-top: 1px solid #353a40; } .status:empty { display: none; } footer { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 8px; border-top: 1px solid #353a40; } .collapsed .body, .collapsed footer, .collapsed .meta, .collapsed .status { display: none; } .hidden { display: none; }
 @media (max-width: 420px) { :host { inset: auto 6px 6px auto; } .panel { width: min(320px, calc(100vw - 12px)); max-height: calc(100vh - 12px); } }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } } :global(.fd-freeze-motion), :global(.fd-freeze-motion) * { animation-play-state: paused !important; transition: none !important; }
 `;
 
 export class FoundationDevtoolsElement extends HTMLElement {
@@ -42,15 +46,25 @@ export class FoundationDevtoolsElement extends HTMLElement {
   private selectedTarget: string | undefined;
   private compareMode: 'modified' | 'original' = 'modified';
   private pickerCleanup?: () => void;
+  private activeTab: 'inspect' | 'compose' | 'changes' = 'compose';
+  private selected?: HTMLElement;
+  private annotations: Annotation[] = [];
+  private intent = '';
+  private history: DevtoolsState[] = [];
+  private future: DevtoolsState[] = [];
+  private frozen = false;
+  private frozenVideos: HTMLVideoElement[] = [];
 
   connectedCallback(): void {
     if (!this.shadowRoot) this.attachShadow({ mode: 'open' });
     if (!this.ready) this.build();
     document.addEventListener('keydown', this.recover);
+    document.addEventListener('keydown', this.toolKeys);
   }
 
   disconnectedCallback(): void {
     document.removeEventListener('keydown', this.recover);
+    document.removeEventListener('keydown', this.toolKeys);
     this.pickerCleanup?.(); this.pickerCleanup = undefined;
   }
 
@@ -60,6 +74,7 @@ export class FoundationDevtoolsElement extends HTMLElement {
     const encoded = new URL(location.href).searchParams.get(this.config.queryKey ?? 'fd');
     this.state = decodeState(this.config, encoded);
     this.restorePanelMode();
+    try { const tab = localStorage.getItem(`${this.storageKey}:tab`); if (tab === 'inspect' || tab === 'compose' || tab === 'changes') this.activeTab = tab; } catch {}
     this.render();
     this.apply();
   }
@@ -71,15 +86,31 @@ export class FoundationDevtoolsElement extends HTMLElement {
         <header class="bar"><strong class="title">FD · devtools</strong>
           <button class="icon" data-action="collapse" aria-label="Panel öffnen" aria-expanded="false">+</button>
           <button class="icon" data-action="hide" aria-label="Ausblenden">×</button>
-        </header><div class="body"></div><div class="meta"></div><div class="status" role="status" aria-live="polite"></div>
-        <footer><button data-action="reset">Reset</button><button data-action="pick">Pick section</button><button data-action="changes">Copy changes</button><button data-action="brief">Copy agent brief</button><button data-action="permalink">Permalink</button>
+        </header><nav class="tabs" aria-label="Views"><button data-action="tab-inspect">Inspect</button><button data-action="tab-compose">Compose</button><button data-action="tab-changes">Changes</button></nav><div class="body"></div><div class="meta"></div><div class="status" role="status" aria-live="polite"></div>
+        <footer><button data-action="reset">Reset</button><button data-action="pick">Pick DOM</button><button data-action="freeze">Freeze motion</button><button data-action="undo">Undo</button><button data-action="redo">Redo</button><button data-action="changes">Copy changes</button><button data-action="brief">Copy agent brief</button><button data-action="permalink">Permalink</button>
           <button data-action="json">JSON</button><button data-action="ts">TypeScript</button><button data-action="download">Download</button></footer>
       </section>`;
     this.panel = root.querySelector('.panel')!;
     this.status = root.querySelector('.status')!;
+    this.panel.addEventListener('pointerdown', (event) => { if ((event.target as HTMLElement).closest('button,input,select')) return; this.panel!.setPointerCapture((event as PointerEvent).pointerId); const start = event as PointerEvent; const rect = this.panel!.getBoundingClientRect(); const move = (e: PointerEvent) => { this.panel!.style.left = `${Math.max(0, Math.min(innerWidth - rect.width, rect.left + e.clientX - start.clientX))}px`; this.panel!.style.top = `${Math.max(0, Math.min(innerHeight - rect.height, rect.top + e.clientY - start.clientY))}px`; this.panel!.style.right = 'auto'; this.panel!.style.bottom = 'auto'; }; const end = () => { this.panel!.removeEventListener('pointermove', move); this.panel!.removeEventListener('pointerup', end); }; this.panel!.addEventListener('pointermove', move); this.panel!.addEventListener('pointerup', end); });
     root.addEventListener('click', (event) => { const target = event.target as HTMLElement; this.action(target.dataset.action, target.dataset.control); });
     this.ready = true;
   }
+
+  private toolKeys = (event: KeyboardEvent): void => {
+    const focused = this.shadowRoot?.activeElement || document.activeElement;
+    const inTool = focused === (this as Element) || Boolean(focused && this.shadowRoot?.contains(focused));
+    if (!inTool && !this.pickerCleanup) return;
+    if (event.key === '1' || event.key === '2' || event.key === '3') { this.activeTab = ({ '1': 'inspect', '2': 'compose', '3': 'changes' } as const)[event.key]; this.render(); }
+    else if (event.key.toLowerCase() === 'i') this.startPicker();
+    else if (event.key.toLowerCase() === 'v') this.pickerCleanup?.();
+    else if (event.key === '[' && this.selected?.parentElement) { this.selected = this.selected.parentElement; this.render(); }
+    else if (event.key === ']' && this.selected?.firstElementChild) { this.selected = this.selected.firstElementChild as HTMLElement; this.render(); }
+    else if (event.key.toLowerCase() === 'a' && this.selected && this.annotations.length < 8) { this.annotations.push(annotationFor(this.selected, this.config, this.intent)); this.render(); }
+    else if (event.key === '?' ) this.feedback('V Picker · I Inspect · 1/2/3 Views · A Annotate · Esc Close');
+    else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? this.redo() : this.undo(); }
+    else if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && this.config && this.state) { void this.copy(handoff(this.config, this.state, this.selected ? annotationFor(this.selected, this.config, this.intent) : undefined, this.annotations, this.intent)); }
+  };
 
   private recover = (event: KeyboardEvent): void => {
     if (event.shiftKey && event.key.toLowerCase() === 'd' && (event.metaKey || event.ctrlKey)) {
@@ -91,8 +122,10 @@ export class FoundationDevtoolsElement extends HTMLElement {
 
   private render(): void {
     if (!this.config || !this.state) return;
-    const body = this.shadowRoot!.querySelector('.body')!;
+    const body = this.shadowRoot!.querySelector<HTMLElement>('.body')!;
     body.replaceChildren();
+    if (this.activeTab === 'inspect') { this.renderInspect(body); return; }
+    if (this.activeTab === 'changes') { this.renderChanges(body); return; }
     const compare = document.createElement('div'); compare.className = 'compare';
     compare.innerHTML = '<button data-action="compare-original" aria-pressed="false">Original</button><button data-action="compare-modified" aria-pressed="true">Modified</button>';
     compare.querySelector<HTMLButtonElement>('[data-action="compare-original"]')!.setAttribute('aria-pressed', String(this.compareMode === 'original'));
@@ -128,6 +161,7 @@ export class FoundationDevtoolsElement extends HTMLElement {
       for (const variant of family.variants) select.add(new Option(variant.label ?? variant.name, variant.name));
       select.value = this.state.families[family.key];
       select.addEventListener('change', () => {
+        this.pushHistory();
         this.state!.families[family.key] = select.value;
         const chosen = family.variants.find((variant) => variant.name === select.value);
         Object.assign(this.state!.values, chosen?.defaults ?? {});
@@ -170,6 +204,7 @@ export class FoundationDevtoolsElement extends HTMLElement {
       range.value = String(this.state!.values[control.key]);
       output.textContent = this.rangeText(control, range.value);
       range.addEventListener('input', () => {
+        this.pushHistory();
         this.state!.values[control.key] = Number(range.value);
         output.textContent = this.rangeText(control, range.value);
         this.update();
@@ -179,6 +214,7 @@ export class FoundationDevtoolsElement extends HTMLElement {
       toggle.type = 'checkbox';
       toggle.checked = Boolean(this.state!.values[control.key]);
       toggle.addEventListener('change', () => {
+        this.pushHistory();
         this.state!.values[control.key] = toggle.checked;
         this.update();
       });
@@ -187,6 +223,7 @@ export class FoundationDevtoolsElement extends HTMLElement {
       for (const option of control.options) select.add(new Option(typeof option === 'string' ? option : option.label, typeof option === 'string' ? option : option.value));
       select.value = String(this.state!.values[control.key]);
       select.addEventListener('change', () => {
+        this.pushHistory();
         this.state!.values[control.key] = select.value;
         this.update();
       });
@@ -271,6 +308,23 @@ export class FoundationDevtoolsElement extends HTMLElement {
     }
   }
 
+  private renderInspect(body: HTMLElement): void {
+    const selected = this.selected;
+    const heading = document.createElement('div'); heading.textContent = selected ? `Selected: ${selected.tagName.toLowerCase()}` : 'Select any DOM element'; body.append(heading);
+    if (!selected) { const hint = document.createElement('p'); hint.textContent = 'Use Pick DOM, then click an element on the page.'; body.append(hint); return; }
+    const facts = layoutFacts(selected); const list = document.createElement('dl');
+    for (const [key, value] of Object.entries(facts)) { const d = document.createElement('div'); d.textContent = `${key}: ${typeof value === 'object' ? `${value.width} × ${value.height}` : value}`; list.append(d); } body.append(list);
+    const nav = document.createElement('div');
+    for (const [label, element] of [['Parent', selected.parentElement], ['Child', selected.firstElementChild]] as const) { const button = document.createElement('button'); button.textContent = label; button.disabled = !element; button.onclick = () => { if (element) { this.selected = element as HTMLElement; this.render(); this.markSelected(); } }; nav.append(button); } body.append(nav);
+    const annotate = document.createElement('button'); annotate.textContent = 'Pin annotation'; annotate.dataset.action = 'annotate'; body.append(annotate);
+  }
+  private renderChanges(body: HTMLElement): void {
+    const diff = changes(this.config!, this.state!); const pre = document.createElement('pre'); pre.textContent = changesJson(this.config!, this.state!); body.append(pre);
+    const input = document.createElement('input'); input.placeholder = 'Intent (optional)'; input.value = this.intent; input.oninput = () => { this.intent = input.value.slice(0, 500); }; body.append(input);
+    const brief = document.createElement('button'); brief.textContent = `Copy agent brief (${diff.count})`; brief.dataset.action = 'brief'; body.append(brief);
+    if (this.annotations.length) { const note = document.createElement('p'); note.textContent = `${this.annotations.length} annotation(s) pinned`; body.append(note); }
+  }
+  private markSelected(): void { if (!this.selected) return; const old = this.selected.style.outline; this.selected.style.outline = '2px solid #74b9ff'; window.setTimeout(() => { if (this.selected?.style.outline === '2px solid rgb(116, 185, 255)') this.selected.style.outline = old; }, 1000); }
   private apply(): void { if (this.config && this.state) applyEffects(this.config, this.compareMode === 'modified' ? this.state : initialState(this.config)); }
 
   private update(): void {
@@ -289,14 +343,19 @@ export class FoundationDevtoolsElement extends HTMLElement {
     if (!action || !this.config || !this.state) return;
     if (action === 'collapse') this.setPanelMode(this.panel?.classList.contains('collapsed') ? 'open' : 'collapsed');
     if (action === 'hide') this.setPanelMode('hidden');
-    if (action === 'reset') { this.state = initialState(this.config); this.render(); this.update(); }
+    if (action === 'reset') { this.pushHistory(); this.state = initialState(this.config); this.render(); this.update(); }
+    if (action === 'tab-inspect' || action === 'tab-compose' || action === 'tab-changes') { this.activeTab = action.slice(4) as typeof this.activeTab; try { localStorage.setItem(`${this.storageKey}:tab`, this.activeTab); } catch {} this.render(); }
+    if (action === 'annotate' && this.selected) { if (this.annotations.length < 8) this.annotations.push(annotationFor(this.selected, this.config, this.intent)); this.render(); }
+    if (action === 'freeze') this.toggleFreeze();
+    if (action === 'undo') this.undo();
+    if (action === 'redo') this.redo();
     if (action === 'reset-control' && controlKey) {
       const control = this.config.controls?.find((item) => item.key === controlKey);
       if (control) { this.state.values[controlKey] = initialState(this.config).values[controlKey]; this.render(); this.update(); }
     }
     if (action === 'reset-target' && controlKey) { this.state = resetBaseline(this.config, this.state, controlKey); this.render(); this.update(); }
     if (action === 'changes') await this.copy(changesJson(this.config, this.state));
-    if (action === 'brief') await this.copy(agentBrief(this.config, this.state));
+    if (action === 'brief') await this.copy(handoff(this.config, this.state, this.selected ? annotationFor(this.selected, this.config, this.intent) : undefined, this.annotations, this.intent));
     if (action === 'pick') { this.feedback('Pick a registered section or press Escape'); this.startPicker(); }
     if (action === 'compare-original') { this.compareMode = 'original'; this.render(); this.apply(); }
     if (action === 'compare-modified') { this.compareMode = 'modified'; this.render(); this.apply(); }
@@ -308,16 +367,14 @@ export class FoundationDevtoolsElement extends HTMLElement {
 
   private startPicker(): void {
     this.pickerCleanup?.();
-    if (!this.config?.targets) return;
-    const keys = this.config.targets.filter((target) => target.kind === 'section').map((target) => target.key);
-    const elements = keys.flatMap((key) => Array.from(document.querySelectorAll<HTMLElement>(`[data-fd-target="${CSS.escape(key)}"]`)));
+    const elements = Array.from(document.querySelectorAll<HTMLElement>('body *')).filter((element) => !this.isToolElement(element));
     const oldOutline = new Map<HTMLElement, string>();
     const oldTabIndex = new Map<HTMLElement, string | null>();
     let hovered: HTMLElement | undefined;
     const listeners = new Map<HTMLElement, { enter: () => void; leave: () => void; focus: () => void; key: (event: KeyboardEvent) => void }>();
     const clearMark = () => { if (hovered) { hovered.style.outline = oldOutline.get(hovered) ?? ''; hovered = undefined; } };
     const mark = (element: HTMLElement) => { clearMark(); oldOutline.set(element, element.style.outline); hovered = element; element.style.outline = '2px solid #8f98a3'; };
-    const select = (element: HTMLElement, event: Event) => { event.preventDefault(); event.stopPropagation(); this.selectedTarget = element.dataset.fdTarget; cleanup(); this.render(); };
+    const select = (element: HTMLElement, event: Event) => { event.preventDefault(); event.stopPropagation(); this.selected = element; this.selectedTarget = element.closest<HTMLElement>('[data-fd-target]')?.dataset.fdTarget; if ((event as MouseEvent).shiftKey && this.annotations.length < 8) this.annotations.push(annotationFor(element, this.config, this.intent)); else { cleanup(); this.render(); } };
     const cleanup = () => {
       clearMark();
       elements.forEach((element) => {
@@ -347,6 +404,16 @@ export class FoundationDevtoolsElement extends HTMLElement {
     elements[0]?.focus({ preventScroll: true });
   }
 
+  private isToolElement(element: Element): boolean { return element === (this as Element) || Boolean(this.shadowRoot?.contains(element)); }
+  private pushHistory(): void { if (!this.state) return; this.history.push(structuredClone(this.state)); if (this.history.length > 30) this.history.shift(); this.future = []; }
+  private undo(): void { if (!this.state || !this.history.length) return; this.future.push(structuredClone(this.state)); this.state = this.history.pop()!; this.render(); this.update(); }
+  private redo(): void { if (!this.state || !this.future.length) return; this.history.push(structuredClone(this.state)); this.state = this.future.pop()!; this.render(); this.update(); }
+  private toggleFreeze(): void {
+    this.frozen = !this.frozen;
+    let style = document.getElementById('fd-freeze-motion');
+    if (this.frozen) { this.frozenVideos = Array.from(document.querySelectorAll('video')).filter((video) => !video.paused); if (!style) { style = document.createElement('style'); style.id = 'fd-freeze-motion'; style.textContent = '*,*::before,*::after{animation-play-state:paused!important;transition:none!important}'; document.head.append(style); } for (const video of document.querySelectorAll('video')) video.pause(); this.feedback('Motion frozen'); }
+    else { style?.remove(); for (const video of this.frozenVideos) void video.play().catch(() => {}); this.frozenVideos = []; this.feedback('Motion resumed'); }
+  }
   private async copy(value: string): Promise<void> {
     try {
       if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable');

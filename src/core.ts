@@ -75,6 +75,7 @@ export type DevtoolsConfig = {
   families: readonly Family[];
   controls?: readonly Control[];
   targets?: readonly Target[];
+  registrations?: readonly DomRegistration[];
   metadata?: Metadata;
   queryKey?: string;
 };
@@ -119,6 +120,7 @@ export function validateConfig(input: unknown): DevtoolsConfig {
     fail('query key');
   }
   if (input.targets !== undefined && !Array.isArray(input.targets)) fail('targets');
+  if (input.registrations !== undefined && (!Array.isArray(input.registrations) || input.registrations.some((item) => !isRecord(item) || typeof item.key !== 'string' || !keyPattern.test(item.key) || (item.scope !== undefined && (typeof item.scope !== 'string' || !scopePattern.test(item.scope))) || (item.target !== undefined && typeof item.target !== 'string')))) fail('registrations');
   const targets: Target[] = [];
   const targetKeys = new Set<string>();
   for (const targetValue of (Array.isArray(input.targets) ? input.targets : [])) {
@@ -414,6 +416,71 @@ export function recipe(config: DevtoolsConfig, state: DevtoolsState): string {
 
 export function typescriptRecipe(config: DevtoolsConfig, state: DevtoolsState): string {
   return `import { defineDevtoolsConfig, validateState } from '@cray-com/foundation-devtools';\n\nconst config = defineDevtoolsConfig(${JSON.stringify(config, null, 2)});\nconst state = validateState(config, ${JSON.stringify(validateState(config, state), null, 2)});\n\nexport { config, state };\n`;
+}
+
+/** A safe, explicit DOM registration. Registrations never infer controls from classes. */
+export type DomRegistration = {
+  key: string;
+  label?: string;
+  scope?: string;
+  target?: string;
+};
+export type LayoutFacts = {
+  rect: { x: number; y: number; width: number; height: number };
+  display: string;
+  gridColumns: string;
+  gap: string;
+  position: string;
+  overflow: string;
+  container?: string;
+  path: string;
+};
+export type Annotation = {
+  route: string;
+  locale?: string;
+  target?: string;
+  component?: string;
+  scope?: string;
+  selector: string;
+  rect: LayoutFacts['rect'];
+  comment?: string;
+};
+
+function safeRoute(value: string): string {
+  try { const url = new URL(value, 'http://localhost'); return `${url.pathname}${url.hash}`; } catch { return '/'; }
+}
+function cssIdent(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, (char) => `\\${char.charCodeAt(0).toString(16)} `);
+}
+/** Stable, bounded selector used for handoff; it never includes text or form values. */
+export function domPath(element: Element, limit = 8): string {
+  const parts: string[] = []; let current: Element | null = element;
+  while (current && parts.length < limit && current.nodeType === 1) {
+    let part = current.tagName.toLowerCase();
+    const id = current.getAttribute('id');
+    if (id && /^[a-zA-Z][\\w-]{0,63}$/.test(id)) part += `#${cssIdent(id)}`;
+    else { const scope = current.getAttribute('data-fd-scope'); if (scope && scopePattern.test(scope)) part += `[data-fd-scope="${scope}"]`; }
+    parts.unshift(part); current = current.parentElement;
+  }
+  return parts.join(' > ').slice(0, 512);
+}
+export function layoutFacts(element: Element): LayoutFacts {
+  const rect = element.getBoundingClientRect();
+  const style = getComputedStyle(element);
+  const parent = element.parentElement;
+  return { rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) }, display: style.display, gridColumns: style.gridTemplateColumns, gap: style.gap, position: style.position, overflow: style.overflow, ...(parent ? { container: parent.tagName.toLowerCase() } : {}), path: domPath(element) };
+}
+export function annotationFor(element: Element, config?: DevtoolsConfig, comment?: string): Annotation {
+  const scope = element.closest('[data-fd-scope]')?.getAttribute('data-fd-scope') ?? undefined;
+  const target = element.closest('[data-fd-target]')?.getAttribute('data-fd-target') ?? undefined;
+  const registered = config?.families.find((family) => (family.effect?.scope ?? family.key) === scope);
+  const rect = element.getBoundingClientRect();
+  return { route: safeRoute(typeof location === 'undefined' ? '/' : location.href), ...(config?.metadata?.locale ? { locale: config.metadata.locale } : {}), ...(target ? { target } : {}), ...(registered ? { component: registered.key } : {}), ...(scope ? { scope } : {}), selector: domPath(element), rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) }, ...(comment ? { comment: comment.slice(0, 500) } : {}) };
+}
+export function handoff(config: DevtoolsConfig, state: DevtoolsState, selected?: Annotation, annotations: readonly Annotation[] = [], intent?: string): string {
+  const diff = changes(config, state);
+  const payload = { ...(selected ? { selected } : {}), annotations: annotations.slice(0, 8), ...(intent ? { intent: intent.slice(0, 500) } : {}), changes: diff };
+  return agentBrief(config, state) + '\n\n## Selection context\n\n```json\n' + JSON.stringify(payload) + '\n```';
 }
 
 export function defineDevtoolsConfig(config: DevtoolsConfig): DevtoolsConfig {
