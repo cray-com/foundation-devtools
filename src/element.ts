@@ -25,7 +25,7 @@ import {
 const styles = `
 :host { all: initial; position: fixed; inset: auto 12px 12px auto; z-index: 2147483647; color: #e9edf2; font: 12px/1.3 ui-monospace, SFMono-Regular, monospace; }
 * { box-sizing: border-box; }
-.panel { width: min(360px, calc(100vw - 24px)); max-height: min(760px, calc(100vh - 24px)); overflow: auto; background: #17191c; border: 1px solid #454a51; border-radius: 6px; box-shadow: 0 5px 24px #0008; }
+.panel { width: min(360px, calc(100vw - 24px)); max-height: min(760px, 70vh, calc(100vh - 24px)); overflow: auto; background: #17191c; border: 1px solid #454a51; border-radius: 6px; box-shadow: 0 5px 24px #0008; }
 .bar { display: flex; align-items: center; gap: 6px; padding: 5px 7px; background: #22262a; position: sticky; top: 0; } .tabs { display:flex; gap:2px; padding:4px 7px; border-bottom:1px solid #353a40; } .tabs button { flex:1; }
 .title { flex: 1; font-weight: 700; } button { border: 0; border-radius: 3px; padding: 4px 6px; color: inherit; background: #292e34; cursor: pointer; } .icon { background: transparent; font-size: 15px; }
 button:focus, select:focus, input:focus { outline: 2px solid #74b9ff; outline-offset: 1px; } button[aria-pressed="true"] { background: #4a5868; color: #fff; }
@@ -34,7 +34,7 @@ button:focus, select:focus, input:focus { outline: 2px solid #74b9ff; outline-of
 label { display: flex; justify-content: space-between; gap: 8px; color: #c8cdd3; } output { margin-left: auto; color: #fff; }
 input, select { width: 100%; min-width: 0; color: #fff; background: #292e34; border: 1px solid #555b64; border-radius: 3px; padding: 3px; } input[type=checkbox] { width: auto; justify-self: start; }
 .meta, .status { padding: 7px 9px; color: #9ba3ad; border-top: 1px solid #353a40; } .status:empty { display: none; } footer { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 8px; border-top: 1px solid #353a40; } .collapsed .body, .collapsed footer, .collapsed .meta, .collapsed .status { display: none; } .hidden { display: none; }
-@media (max-width: 420px) { :host { inset: auto 6px 6px auto; } .panel { width: min(320px, calc(100vw - 12px)); max-height: calc(100vh - 12px); } }
+@media (max-width: 420px) { :host { inset: auto 6px 6px auto; } .panel { width: min(320px, calc(100vw - 12px)); max-height: min(760px, 70vh, calc(100vh - 24px)); } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } } :global(.fd-freeze-motion), :global(.fd-freeze-motion) * { animation-play-state: paused !important; transition: none !important; }
 `;
 
@@ -132,28 +132,30 @@ export class FoundationDevtoolsElement extends HTMLElement {
     const focused = this.shadowRoot?.activeElement || document.activeElement;
     const inTool = focused === (this as Element) || Boolean(focused && this.shadowRoot?.contains(focused));
     if (!inTool && !this.pickerCleanup) return;
-    if (event.shiftKey && event.key === '2' && this.selected) {
+    const noModifiers = !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey;
+    const command = event.metaKey || event.ctrlKey;
+    if (event.shiftKey && event.key === '2' && !event.ctrlKey && !event.metaKey && !event.altKey && this.selected) {
       event.preventDefault();
       this.selected.scrollIntoView({ block: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
       if (!this.selected.hasAttribute('tabindex')) this.selected.tabIndex = -1;
       this.selected.focus({ preventScroll: true });
       this.markSelected();
-    } else if (event.key === ' ' && this.pickerCleanup) {
+    } else if (noModifiers && event.key === ' ' && this.pickerCleanup) {
       event.preventDefault();
       this.pickerSuspended = true;
-    } else if (event.key === '1' || event.key === '2' || event.key === '3') { this.activeTab = ({ '1': 'inspect', '2': 'compose', '3': 'changes' } as const)[event.key]; this.render(); }
-    else if (event.key.toLowerCase() === 'i') this.startPicker();
-    else if (event.key.toLowerCase() === 'v') this.pickerCleanup?.();
-    else if (event.key === '[' && this.selected?.parentElement) { this.selected = this.selected.parentElement; this.render(); }
-    else if (event.key === ']' && this.selected?.firstElementChild) { this.selected = this.selected.firstElementChild as HTMLElement; this.render(); }
-    else if (event.key.toLowerCase() === 'a' && this.selected && this.annotations.length < 8) { this.annotations.push(annotationFor(this.selected, this.config, this.intent)); this.render(); }
-    else if (event.key === '?' ) this.feedback('V Picker · I Inspect · 1/2/3 Views · A Annotate · Esc Close');
-    else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? this.redo() : this.undo(); }
-    else if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && this.config && this.state) { void this.copy(handoff(this.config, this.state, this.selected ? annotationFor(this.selected, this.config, this.intent) : undefined, this.annotations, this.intent)); }
+    } else if (noModifiers && (event.key === '1' || event.key === '2' || event.key === '3')) { this.setActiveTab(({ '1': 'inspect', '2': 'compose', '3': 'changes' } as const)[event.key]); }
+    else if (noModifiers && event.key.toLowerCase() === 'i') this.startPicker();
+    else if (noModifiers && event.key.toLowerCase() === 'v') this.pickerCleanup?.();
+    else if (noModifiers && event.key === '[' && this.selected?.parentElement) { this.selected = this.selected.parentElement; this.render(); }
+    else if (noModifiers && event.key === ']' && this.selected?.firstElementChild) { this.selected = this.selected.firstElementChild as HTMLElement; this.render(); }
+    else if (noModifiers && event.key.toLowerCase() === 'a' && this.selected && this.annotations.length < 8) { this.annotations.push(annotationFor(this.selected, this.config, this.intent)); this.render(); }
+    else if (noModifiers && event.key === '?' ) this.feedback('V Picker · I Inspect · 1/2/3 Views · A Annotate · Esc Close');
+    else if (command && !event.altKey && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? this.redo() : this.undo(); }
+    else if (command && !event.altKey && !event.shiftKey && event.key === 'Enter' && this.config && this.state) { void this.copy(handoff(this.config, this.state, this.selected ? annotationFor(this.selected, this.config, this.intent) : undefined, this.annotations, this.intent)); }
   };
 
   private recover = (event: KeyboardEvent): void => {
-    if (event.shiftKey && event.key.toLowerCase() === 'd' && (event.metaKey || event.ctrlKey)) {
+    if (event.shiftKey && event.key.toLowerCase() === 'd' && (event.metaKey || event.ctrlKey) && !event.altKey) {
       event.preventDefault();
       if (this.panel?.classList.contains('hidden')) this.setPanelMode('collapsed');
       else this.setPanelMode(this.panel?.classList.contains('collapsed') ? 'open' : 'collapsed');
@@ -373,6 +375,9 @@ export class FoundationDevtoolsElement extends HTMLElement {
   }
 
   private renderInspect(body: HTMLElement): void {
+    const map = document.createElement('div'); map.className = 'map'; map.setAttribute('aria-label', 'Page map');
+    for (const target of this.config?.targets ?? []) { const button = document.createElement('button'); button.textContent = `${target.label} (${target.kind})`; button.onclick = () => this.revealTarget(target.key); map.append(button); }
+    body.append(map);
     const selected = this.selected;
     const heading = document.createElement('h2'); heading.textContent = selected ? `Selected: ${selected.tagName.toLowerCase()}` : 'Select any DOM element'; body.append(heading);
     if (!selected) {
@@ -386,8 +391,9 @@ export class FoundationDevtoolsElement extends HTMLElement {
     for (const [key, value] of Object.entries(facts)) { const d = document.createElement('div'); d.textContent = `${key}: ${typeof value === 'object' ? `${value.width} × ${value.height}` : value}`; list.append(d); } body.append(list);
     const nav = document.createElement('div');
     for (const [label, element] of [['Parent', this.parentOf(selected)], ['Child', this.childOf(selected)]] as const) { const button = document.createElement('button'); button.textContent = label; button.disabled = !element; button.onclick = () => { if (element) { this.selected = element; this.render(); this.markSelected(); } }; nav.append(button); } body.append(nav);
-    const map = document.createElement('div'); map.className = 'map'; map.setAttribute('aria-label', 'Page map');
-    for (const target of this.config?.targets ?? []) { const button = document.createElement('button'); button.textContent = `${target.label} (${target.kind})`; button.onclick = () => this.revealTarget(target.key); map.append(button); } if (map.children.length) body.append(map);
+    const inspectActions = document.createElement('div');
+    for (const [label, action] of [['Copy selector', 'copy-selector'], ['Copy DOM path', 'copy-dom-path'], ['Copy context', 'copy-context']] as const) { const button = document.createElement('button'); button.textContent = label; button.dataset.action = action; inspectActions.append(button); }
+    body.append(inspectActions);
     const annotate = document.createElement('button'); annotate.textContent = 'Pin annotation'; annotate.dataset.action = 'annotate'; body.append(annotate);
   }
   private renderChanges(body: HTMLElement): void {
@@ -412,12 +418,18 @@ export class FoundationDevtoolsElement extends HTMLElement {
     }
   }
 
+  private setActiveTab(tab: typeof this.activeTab): void {
+    this.activeTab = tab;
+    try { localStorage.setItem(`${this.storageKey}:tab`, tab); } catch { /* Storage is optional. */ }
+    this.render();
+  }
+
   private async action(action?: string, controlKey?: string): Promise<void> {
     if (!action || !this.config || !this.state) return;
     if (action === 'collapse') this.setPanelMode(this.panel?.classList.contains('collapsed') ? 'open' : 'collapsed');
     if (action === 'hide') this.setPanelMode('hidden');
     if (action === 'reset') { const next = initialState(this.config); if (JSON.stringify(next) !== JSON.stringify(this.state)) { this.pushHistory(); this.state = next; this.render(); this.update(); } }
-    if (action === 'tab-inspect' || action === 'tab-compose' || action === 'tab-changes') { this.activeTab = action.slice(4) as typeof this.activeTab; try { localStorage.setItem(`${this.storageKey}:tab`, this.activeTab); } catch {} this.render(); }
+    if (action === 'tab-inspect' || action === 'tab-compose' || action === 'tab-changes') this.setActiveTab(action.slice(4) as typeof this.activeTab);
     if (action === 'annotate' && this.selected) { if (this.annotations.length < 8) this.annotations.push(annotationFor(this.selected, this.config, this.intent)); this.render(); }
     if (action === 'freeze') this.toggleFreeze();
     if (action === 'undo') this.undo();
@@ -427,6 +439,12 @@ export class FoundationDevtoolsElement extends HTMLElement {
       if (control && this.state.values[controlKey] !== initialState(this.config).values[controlKey]) { this.pushHistory(); this.state.values[controlKey] = initialState(this.config).values[controlKey]; this.render(); this.update(); }
     }
     if (action === 'reset-target' && controlKey) { const next = resetBaseline(this.config, this.state, controlKey); if (JSON.stringify(next) !== JSON.stringify(this.state)) { this.pushHistory(); this.state = next; this.render(); this.update(); } }
+    if (action === 'copy-selector' && this.selected) await this.copy(annotationFor(this.selected, this.config, this.intent).selector);
+    if (action === 'copy-dom-path' && this.selected) await this.copy(layoutFacts(this.selected).path);
+    if (action === 'copy-context' && this.selected) {
+      const annotation = annotationFor(this.selected, this.config, this.intent); const facts = layoutFacts(this.selected);
+      await this.copy(JSON.stringify({ selector: annotation.selector, domPath: facts.path, layout: { rect: facts.rect, display: facts.display.slice(0, 64), gridColumns: facts.gridColumns.slice(0, 128), gap: facts.gap.slice(0, 64), position: facts.position.slice(0, 32), overflow: facts.overflow.slice(0, 64), container: facts.container } }));
+    }
     if (action === 'changes') await this.copy(changesJson(this.config, this.state));
     if (action === 'brief') await this.copy(handoff(this.config, this.state, this.selected ? annotationFor(this.selected, this.config, this.intent) : undefined, this.annotations, this.intent));
     if (action === 'pick') { this.feedback('Pick a registered section or press Escape'); this.startPicker(); }

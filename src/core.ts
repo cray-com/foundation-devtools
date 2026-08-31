@@ -486,8 +486,9 @@ export type Annotation = {
   comment?: string;
 };
 
-/** Return only the route path; query strings and fragments never enter handoff data. */
+/** Return only the route path; query strings, fragments, and credentials never enter exports. */
 export function safeRoute(value: string): string {
+  if (typeof value !== 'string') return '/';
   try { const url = new URL(value, 'http://localhost'); return url.pathname || '/'; } catch { return '/'; }
 }
 function cssIdent(value: string): string {
@@ -528,10 +529,42 @@ export function annotationFor(element: Element, config?: DevtoolsConfig, comment
 }
 export function recipeRegistry(config: DevtoolsConfig): readonly Recipe[] { return (config.recipes ?? []).map((item) => ({ ...item, state: validateState(config, item.state) })); }
 
+const ANNOTATION_LIMITS = { route: 256, locale: 64, target: 96, component: 128, scope: 96, selector: 512, comment: 500 } as const;
+const HANDOFF_MAX = 16_000;
+function cleanString(value: unknown, limit: number): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  return value.replace(/[\u0000-\u001f\u007f-\u009f]/g, '').slice(0, limit);
+}
+function finiteBox(value: unknown): Annotation['rect'] {
+  const input = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const number = (key: string, minimum: number, maximum: number) => {
+    const item = input[key];
+    return typeof item === 'number' && Number.isFinite(item) ? Math.min(maximum, Math.max(minimum, item)) : 0;
+  };
+  return { x: number('x', -100_000, 100_000), y: number('y', -100_000, 100_000), width: number('width', 0, 100_000), height: number('height', 0, 100_000) };
+}
+/** Copy only the annotation schema. This deliberately drops every unknown field and never mutates input. */
+function safeAnnotation(value: unknown): Annotation | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const input = value as Record<string, unknown>;
+  const route = cleanString(input.route, ANNOTATION_LIMITS.route);
+  const selector = cleanString(input.selector, ANNOTATION_LIMITS.selector);
+  if (!route || !selector) return undefined;
+  const result: Annotation = { route: safeRoute(route), selector, rect: finiteBox(input.rect) };
+  for (const key of ['locale', 'target', 'component', 'scope', 'comment'] as const) {
+    const item = cleanString(input[key], ANNOTATION_LIMITS[key]);
+    if (item) result[key] = item;
+  }
+  return result;
+}
 export function handoff(config: DevtoolsConfig, state: DevtoolsState, selected?: Annotation, annotations: readonly Annotation[] = [], intent?: string): string {
   const diff = changes(config, state);
-  const payload = { ...(selected ? { selected } : {}), annotations: annotations.slice(0, 8), ...(intent ? { intent: intent.slice(0, 500) } : {}), changes: diff };
-  return agentBrief(config, state) + '\n\n## Selection context\n\n```json\n' + JSON.stringify(payload) + '\n```';
+  const safeSelected = safeAnnotation(selected);
+  const safeAnnotations = Array.isArray(annotations) ? annotations.map(safeAnnotation).filter((item): item is Annotation => Boolean(item)).slice(0, 8) : [];
+  const safeIntent = cleanString(intent, 500);
+  const payload = { ...(safeSelected ? { selected: safeSelected } : {}), annotations: safeAnnotations, ...(safeIntent ? { intent: safeIntent } : {}), changes: diff };
+  const output = agentBrief(config, state) + '\n\n## Selection context\n\n```json\n' + JSON.stringify(payload) + '\n```';
+  return output.slice(0, HANDOFF_MAX);
 }
 
 export function defineDevtoolsConfig(config: DevtoolsConfig): DevtoolsConfig {

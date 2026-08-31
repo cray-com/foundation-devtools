@@ -59,6 +59,16 @@
   const grid = document.querySelector('[data-fd-scope="grid"]');
   const map = root.querySelector('.map');
   const mapCounts = map && map.textContent.includes('All 4 · Δ4') && map.textContent.includes('Global 2 · Δ2') && map.textContent.includes('Hero 2 · Δ2') && map.textContent.includes('Notes 0 · Δ0');
+  root.querySelector('[data-action="tab-inspect"]').click();
+  const inspectMapWithoutSelection = Boolean(root.querySelector('[aria-label="Page map"]')) && !root.querySelector('[data-action="copy-selector"]');
+  root.querySelector('[data-action="tab-compose"]').click();
+  root.querySelector('[data-action="tab-compose"]')?.focus();
+  const firefoxShortcut = new KeyboardEvent('keydown', { key: '1', ctrlKey: true, bubbles: true, cancelable: true });
+  document.dispatchEvent(firefoxShortcut);
+  const browserShortcutIgnored = !root.querySelector('.body h2') && !firefoxShortcut.defaultPrevented;
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: '1', bubbles: true }));
+  const shortcutTabPersisted = localStorage.getItem('foundation-devtools:fixture:panel:tab') === 'inspect';
+  root.querySelector('[data-action="tab-compose"]').click();
   const isolatedRoot = document.querySelectorAll('[data-fd-target="hero"]')[1];
   isolatedRoot.style.removeProperty('--fd-gap');
   const isolatedState = initialState(config); isolatedState.values.gap = 3;
@@ -116,6 +126,10 @@
   hero.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
   const picked = root.querySelector('[data-map-target="hero"]').getAttribute('aria-pressed') === 'true' && hero.style.outline === '' && !hero.hasAttribute('tabindex');
   root.querySelector('[data-action="tab-inspect"]').click();
+  const inspectCopyActions = Boolean(root.querySelector('[data-action="copy-selector"]')) && Boolean(root.querySelector('[data-action="copy-dom-path"]')) && Boolean(root.querySelector('[data-action="copy-context"]'));
+  root.querySelector('[data-action="copy-context"]').click();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const inspectCopied = ['Copied', 'Copy unavailable'].includes(root.querySelector('.status').textContent);
   root.querySelector('[data-action="tab-inspect"]')?.focus();
   document.dispatchEvent(new KeyboardEvent('keydown', { key: '2', shiftKey: true, bubbles: true }));
   const shiftTwoFocused = document.activeElement === hero;
@@ -166,5 +180,6 @@
   const resizeClamped = panel.getBoundingClientRect().right <= innerWidth && panel.getBoundingClientRect().bottom <= innerHeight;
   document.title = passed && initiallyOpen && collapsed && opened && hidden && hideNotPersisted && restoredCollapsed && shortcutOpened && shadowRevealed && feedback && copiedChanges && copiedBrief && originalApplied && modifiedRestored && emptyTarget && controlReset && marked && pickerSuspended && pickerResumed && cleaned && picked && shiftTwoFocused && targetReset && fullReset
     && groupedHistory && redoneHistory && videoState && edgeSnap && resizeClamped
+    && inspectMapWithoutSelection && browserShortcutIgnored && shortcutTabPersisted && inspectCopyActions && inspectCopied
     ? 'FD browser PASS' : 'FD browser FAIL';
 </script>
