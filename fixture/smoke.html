@@ -49,6 +49,16 @@
   document.body.append(element);
   await new Promise((resolve) => queueMicrotask(resolve));
   const root = element.shadowRoot;
+  const restorePhase = sessionStorage.getItem('foundation-devtools:fixture:restore-test');
+  let restoredSelectionPass = restorePhase === 'normal' || restorePhase === 'shadow';
+  if (restorePhase) {
+    root.querySelector('[data-action="tab-inspect"]').click();
+    const inspectText = root.querySelector('.body').textContent;
+    restoredSelectionPass = restorePhase === 'shadow'
+      ? inspectText.includes('Selected: button') && inspectText.includes(' >>> ')
+      : inspectText.includes('Selected: main') && !inspectText.includes(' >>> ');
+    root.querySelector('[data-action="tab-compose"]').click();
+  }
   const [variant, density] = root.querySelectorAll('select');
   const range = root.querySelector('input[type="range"]');
   const toggle = root.querySelector('input[type="checkbox"]');
@@ -70,7 +80,7 @@
   const map = root.querySelector('.map');
   const mapCounts = map && map.textContent.includes('All 4 · Δ4') && map.textContent.includes('Global 2 · Δ2') && map.textContent.includes('Hero 2 · Δ2') && map.textContent.includes('Notes 0 · Δ0');
   root.querySelector('[data-action="tab-inspect"]').click();
-  const inspectMapWithoutSelection = Boolean(root.querySelector('[aria-label="Page map"]')) && !root.querySelector('[data-action="copy-selector"]');
+  const inspectMapWithoutSelection = Boolean(root.querySelector('[aria-label="Page map"]')) && (restorePhase ? Boolean(root.querySelector('[data-action="copy-selector"]')) : !root.querySelector('[data-action="copy-selector"]'));
   root.querySelector('[data-action="tab-compose"]').click();
   root.querySelector('[data-action="tab-compose"]')?.focus();
   const firefoxShortcut = new KeyboardEvent('keydown', { key: '1', ctrlKey: true, bubbles: true, cancelable: true });
@@ -185,8 +195,25 @@
   running.remove(); paused.remove();
   panel.style.left = '9999px'; panel.style.top = '9999px'; window.dispatchEvent(new Event('resize'));
   const resizeClamped = panel.getBoundingClientRect().right <= innerWidth && panel.getBoundingClientRect().bottom <= innerHeight;
-  document.title = passed && initiallyOpen && collapsed && opened && hidden && hideNotPersisted && restoredCollapsed && shortcutOpened && shadowRevealed && feedback && copiedChanges && copiedBrief && originalApplied && modifiedRestored && emptyTarget && controlReset && marked && pickerSuspended && pickerResumed && cleaned && picked && shiftTwoFocused && targetReset && fullReset
-    && groupedHistory && redoneHistory && videoState && documentFreeze && shadowFreeze && restoredMotion && pathChecks && edgeSnap && resizeClamped
-    && inspectMapWithoutSelection && browserShortcutIgnored && shortcutTabPersisted && inspectCopyActions && inspectCopied
-    ? 'FD browser PASS' : 'FD browser FAIL';
+  const pickForReload = (target) => {
+    root.querySelector('[data-action="pick"]').click();
+    target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  };
+  if (restorePhase === null) {
+    pickForReload(shadow.querySelector('button'));
+    sessionStorage.setItem('foundation-devtools:fixture:restore-test', 'shadow');
+    location.reload();
+    await new Promise(() => {});
+  } else if (restorePhase === 'shadow') {
+    pickForReload(hero);
+    sessionStorage.setItem('foundation-devtools:fixture:restore-test', 'normal');
+    location.reload();
+    await new Promise(() => {});
+  } else {
+    sessionStorage.removeItem('foundation-devtools:fixture:restore-test');
+    document.title = passed && initiallyOpen && collapsed && opened && hidden && hideNotPersisted && restoredCollapsed && shortcutOpened && shadowRevealed && feedback && copiedChanges && copiedBrief && originalApplied && modifiedRestored && emptyTarget && controlReset && marked && pickerSuspended && pickerResumed && cleaned && picked && shiftTwoFocused && targetReset && fullReset
+      && groupedHistory && redoneHistory && videoState && documentFreeze && shadowFreeze && restoredMotion && pathChecks && edgeSnap && resizeClamped
+      && inspectMapWithoutSelection && browserShortcutIgnored && shortcutTabPersisted && inspectCopyActions && inspectCopied && restoredSelectionPass
+      ? 'FD browser PASS' : 'FD browser FAIL';
+  }
 </script>

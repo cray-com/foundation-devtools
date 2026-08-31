@@ -13,6 +13,7 @@ import {
   validateState,
   annotationFor,
   layoutFacts,
+  resolvePath,
   handoff,
   recipeRegistry,
   type Annotation,
@@ -484,7 +485,7 @@ export class FoundationDevtoolsElement extends HTMLElement {
     };
     const select = (element: HTMLElement, event: Event) => {
       if (this.pickerSuspended) return;
-      event.preventDefault(); event.stopImmediatePropagation(); this.selected = element; this.restoredSelection = annotationFor(element, this.config, this.intent); this.selectedTarget = this.dataAncestor(element, 'data-fd-target'); if ((event as MouseEvent).shiftKey && this.annotations.length < 8) this.annotations.push(annotationFor(element, this.config, this.intent)); else { cleanup(); this.render(); } };
+      event.preventDefault(); event.stopImmediatePropagation(); this.selected = element; this.restoredSelection = annotationFor(element, this.config, this.intent); this.selectedTarget = this.dataAncestor(element, 'data-fd-target'); this.persistSession(); if ((event as MouseEvent).shiftKey && this.annotations.length < 8) this.annotations.push(annotationFor(element, this.config, this.intent)); else { cleanup(); this.render(); } };
     const cleanup = () => {
       this.pickerSuspended = false;
       document.removeEventListener('keyup', onDocumentKeyup);
@@ -607,6 +608,8 @@ export class FoundationDevtoolsElement extends HTMLElement {
     } catch { /* Session storage is optional. */ }
   }
   private restoreSession(): void {
+    this.selected = undefined;
+    this.restoredSelection = undefined;
     try {
       const value: unknown = JSON.parse(sessionStorage.getItem(`${this.storageKey}:session`) ?? 'null');
       if (!value || typeof value !== 'object') return;
@@ -625,7 +628,10 @@ export class FoundationDevtoolsElement extends HTMLElement {
       if (valid(record.selected)) this.restoredSelection = record.selected;
       if (Array.isArray(record.annotations)) this.annotations = record.annotations.filter(valid).slice(0, 8);
       if (typeof record.intent === 'string') this.intent = record.intent.slice(0, 500);
-      if (this.restoredSelection?.selector) { try { const candidate = document.querySelector(this.restoredSelection.selector); if (candidate instanceof HTMLElement && !this.isToolElement(candidate)) this.selected = candidate; } catch { /* Invalid or stale selectors remain context-only. */ } }
+      if (this.restoredSelection?.selector) {
+        const candidate = resolvePath(this.restoredSelection.selector);
+        if (candidate instanceof HTMLElement && !this.isToolElement(candidate)) this.selected = candidate;
+      }
     } catch { /* Corrupt or unavailable storage is ignored. */ }
   }
   private async copy(value: string): Promise<void> {
