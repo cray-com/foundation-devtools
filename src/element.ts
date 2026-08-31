@@ -56,8 +56,9 @@ export class FoundationDevtoolsElement extends HTMLElement {
   private future: DevtoolsState[] = [];
   private editingControl = false;
   private frozen = false;
-  private frozenVideos: Array<{ video: HTMLVideoElement; paused: boolean; currentTime: number }> = [];
-  private freezeStyle?: HTMLStyleElement;
+  private frozenVideos: Array<{ video: HTMLVideoElement; currentTime: number }> = [];
+  private freezeStyles: HTMLStyleElement[] = [];
+  private restoredSelection?: Annotation;
 
   connectedCallback(): void {
     if (!this.shadowRoot) this.attachShadow({ mode: 'open' });
@@ -71,9 +72,8 @@ export class FoundationDevtoolsElement extends HTMLElement {
     document.removeEventListener('keydown', this.toolKeys);
     window.removeEventListener('resize', this.clampPanel);
     this.pickerCleanup?.(); this.pickerCleanup = undefined;
-    this.freezeStyle?.remove(); this.freezeStyle = undefined;
-    for (const entry of this.frozenVideos) this.resumeVideo(entry);
-    this.frozenVideos = [];
+    this.endControlInteraction();
+    this.unfreezeMotion();
   }
 
   configure(config: DevtoolsConfig): void {
@@ -81,6 +81,7 @@ export class FoundationDevtoolsElement extends HTMLElement {
     this.storageKey = `foundation-devtools:${this.config.project}:panel`;
     const encoded = new URL(location.href).searchParams.get(this.config.queryKey ?? 'fd');
     this.state = decodeState(this.config, encoded);
+    this.restoreSession();
     this.restorePanelMode();
     this.restorePosition();
     try { const tab = localStorage.getItem(`${this.storageKey}:tab`); if (tab === 'inspect' || tab === 'compose' || tab === 'changes') this.activeTab = tab; } catch {}
@@ -106,14 +107,18 @@ export class FoundationDevtoolsElement extends HTMLElement {
       try { this.panel!.setPointerCapture((event as PointerEvent).pointerId); } catch { /* Synthetic or cancelled pointers need no capture. */ }
       const start = event as PointerEvent; const rect = this.panel!.getBoundingClientRect();
       const move = (e: PointerEvent) => this.setPanelPosition(rect.left + e.clientX - start.clientX, rect.top + e.clientY - start.clientY);
-      const end = () => {
+      const end = (endEvent?: PointerEvent) => {
         this.panel!.removeEventListener('pointermove', move); this.panel!.removeEventListener('pointerup', end); this.panel!.removeEventListener('pointercancel', end);
+        window.removeEventListener('pointermove', move, true); window.removeEventListener('pointerup', end, true); window.removeEventListener('pointercancel', end, true);
         const current = this.panel!.getBoundingClientRect(); const edge = 24;
-        const left = Math.abs(current.left) <= edge ? 0 : Math.abs(innerWidth - current.right) <= edge ? innerWidth - current.width : current.left;
-        const top = Math.abs(current.top) <= edge ? 0 : Math.abs(innerHeight - current.bottom) <= edge ? innerHeight - current.height : current.top;
+        const proposedLeft = endEvent ? rect.left + endEvent.clientX - start.clientX : current.left;
+        const proposedTop = endEvent ? rect.top + endEvent.clientY - start.clientY : current.top;
+        const left = Math.abs(proposedLeft) <= edge ? 0 : Math.abs(innerWidth - (proposedLeft + current.width)) <= edge ? innerWidth - current.width : proposedLeft;
+        const top = Math.abs(proposedTop) <= edge ? 0 : Math.abs(innerHeight - (proposedTop + current.height)) <= edge ? innerHeight - current.height : proposedTop;
         this.setPanelPosition(left, top); this.savePanelPosition(left, top);
       };
       this.panel!.addEventListener('pointermove', move); this.panel!.addEventListener('pointerup', end); this.panel!.addEventListener('pointercancel', end);
+      window.addEventListener('pointermove', move, true); window.addEventListener('pointerup', end, { once: true, capture: true }); window.addEventListener('pointercancel', end, { once: true, capture: true });
     });
     window.addEventListener('resize', this.clampPanel);
 
@@ -146,6 +151,7 @@ export class FoundationDevtoolsElement extends HTMLElement {
 
   private render(): void {
     if (!this.config || !this.state) return;
+    this.persistSession();
     const body = this.shadowRoot!.querySelector<HTMLElement>('.body')!;
     body.replaceChildren();
     if (this.activeTab === 'inspect') { this.renderInspect(body); return; }
@@ -233,6 +239,8 @@ export class FoundationDevtoolsElement extends HTMLElement {
       range.addEventListener('pointerdown', () => this.beginControlInteraction());
       range.addEventListener('pointerup', () => this.endControlInteraction());
       range.addEventListener('pointercancel', () => this.endControlInteraction());
+      range.addEventListener('lostpointercapture', () => this.endControlInteraction());
+      range.addEventListener('blur', () => this.endControlInteraction());
       range.addEventListener('keydown', (event) => { if (event.key.startsWith('Arrow') || event.key === 'Home' || event.key === 'End') this.beginControlInteraction(); });
       range.addEventListener('keyup', (event) => { if (event.key.startsWith('Arrow') || event.key === 'Home' || event.key === 'End') this.endControlInteraction(); });
       range.addEventListener('input', () => {
@@ -355,17 +363,25 @@ export class FoundationDevtoolsElement extends HTMLElement {
 
   private renderInspect(body: HTMLElement): void {
     const selected = this.selected;
-    const heading = document.createElement('div'); heading.textContent = selected ? `Selected: ${selected.tagName.toLowerCase()}` : 'Select any DOM element'; body.append(heading);
-    if (!selected) { const hint = document.createElement('p'); hint.textContent = 'Use Pick DOM, then click an element on the page.'; body.append(hint); return; }
+    const heading = document.createElement('h2'); heading.textContent = selected ? `Selected: ${selected.tagName.toLowerCase()}` : 'Select any DOM element'; body.append(heading);
+    if (!selected) {
+      if (this.restoredSelection) { const saved = document.createElement('p'); saved.textContent = `Saved selection: ${this.restoredSelection.selector}`; body.append(saved); }
+      const hint = document.createElement('p'); hint.textContent = 'Use Pick DOM, then click an element on the page.'; body.append(hint); return;
+    }
+    const breadcrumb = document.createElement('nav'); breadcrumb.setAttribute('aria-label', 'DOM breadcrumb');
+    this.ancestors(selected).forEach((element, index, all) => { const button = document.createElement('button'); button.textContent = element.tagName.toLowerCase(); button.setAttribute('aria-label', `Select ${element.tagName.toLowerCase()} in breadcrumb`); button.onclick = () => { this.selected = element; this.render(); this.markSelected(); }; breadcrumb.append(button); if (index < all.length - 1) breadcrumb.append(document.createTextNode(' › ')); }); body.append(breadcrumb);
+    const context = this.contextFor(selected); const contextText = document.createElement('p'); contextText.setAttribute('aria-label', 'Registered context'); contextText.textContent = `Target: ${context.target ?? '—'} · Component: ${context.component ?? '—'} · Scope: ${context.scope ?? '—'}`; body.append(contextText);
     const facts = layoutFacts(selected); const list = document.createElement('dl');
     for (const [key, value] of Object.entries(facts)) { const d = document.createElement('div'); d.textContent = `${key}: ${typeof value === 'object' ? `${value.width} × ${value.height}` : value}`; list.append(d); } body.append(list);
     const nav = document.createElement('div');
-    for (const [label, element] of [['Parent', selected.parentElement], ['Child', selected.firstElementChild]] as const) { const button = document.createElement('button'); button.textContent = label; button.disabled = !element; button.onclick = () => { if (element) { this.selected = element as HTMLElement; this.render(); this.markSelected(); } }; nav.append(button); } body.append(nav);
+    for (const [label, element] of [['Parent', this.parentOf(selected)], ['Child', this.childOf(selected)]] as const) { const button = document.createElement('button'); button.textContent = label; button.disabled = !element; button.onclick = () => { if (element) { this.selected = element; this.render(); this.markSelected(); } }; nav.append(button); } body.append(nav);
+    const map = document.createElement('div'); map.className = 'map'; map.setAttribute('aria-label', 'Page map');
+    for (const target of this.config?.targets ?? []) { const button = document.createElement('button'); button.textContent = `${target.label} (${target.kind})`; button.onclick = () => this.revealTarget(target.key); map.append(button); } if (map.children.length) body.append(map);
     const annotate = document.createElement('button'); annotate.textContent = 'Pin annotation'; annotate.dataset.action = 'annotate'; body.append(annotate);
   }
   private renderChanges(body: HTMLElement): void {
     const diff = changes(this.config!, this.state!); const pre = document.createElement('pre'); pre.textContent = changesJson(this.config!, this.state!); body.append(pre);
-    const input = document.createElement('input'); input.placeholder = 'Intent (optional)'; input.value = this.intent; input.oninput = () => { this.intent = input.value.slice(0, 500); }; body.append(input);
+    const input = document.createElement('input'); input.placeholder = 'Intent (optional)'; input.value = this.intent; input.oninput = () => { this.intent = input.value.slice(0, 500); this.persistSession(); }; body.append(input);
     const brief = document.createElement('button'); brief.textContent = `Copy agent brief (${diff.count})`; brief.dataset.action = 'brief'; body.append(brief);
     if (this.annotations.length) { const note = document.createElement('p'); note.textContent = `${this.annotations.length} annotation(s) pinned`; body.append(note); }
   }
@@ -377,6 +393,7 @@ export class FoundationDevtoolsElement extends HTMLElement {
     this.compareMode = 'modified';
     this.apply();
     this.refreshIndicators();
+    this.persistSession();
     try {
       history.replaceState(null, '', stateUrl(this.config, this.state));
     } catch {
@@ -412,14 +429,14 @@ export class FoundationDevtoolsElement extends HTMLElement {
 
   private startPicker(): void {
     this.pickerCleanup?.();
-    const elements = Array.from(document.querySelectorAll<HTMLElement>('body *')).filter((element) => !this.isToolElement(element));
+    const elements = this.traverseOpenRoots(document).filter((element) => !this.isToolElement(element));
     const oldOutline = new Map<HTMLElement, string>();
     const oldTabIndex = new Map<HTMLElement, string | null>();
     let hovered: HTMLElement | undefined;
     const listeners = new Map<HTMLElement, { enter: () => void; leave: () => void; focus: () => void; key: (event: KeyboardEvent) => void }>();
     const clearMark = () => { if (hovered) { hovered.style.outline = oldOutline.get(hovered) ?? ''; hovered = undefined; } };
     const mark = (element: HTMLElement) => { clearMark(); oldOutline.set(element, element.style.outline); hovered = element; element.style.outline = '2px solid #8f98a3'; };
-    const select = (element: HTMLElement, event: Event) => { event.preventDefault(); event.stopPropagation(); this.selected = element; this.selectedTarget = element.closest<HTMLElement>('[data-fd-target]')?.dataset.fdTarget; if ((event as MouseEvent).shiftKey && this.annotations.length < 8) this.annotations.push(annotationFor(element, this.config, this.intent)); else { cleanup(); this.render(); } };
+    const select = (element: HTMLElement, event: Event) => { event.preventDefault(); event.stopImmediatePropagation(); this.selected = element; this.restoredSelection = annotationFor(element, this.config, this.intent); this.selectedTarget = this.dataAncestor(element, 'data-fd-target'); if ((event as MouseEvent).shiftKey && this.annotations.length < 8) this.annotations.push(annotationFor(element, this.config, this.intent)); else { cleanup(); this.render(); } };
     const cleanup = () => {
       clearMark();
       elements.forEach((element) => {
@@ -450,33 +467,96 @@ export class FoundationDevtoolsElement extends HTMLElement {
   }
 
   private isToolElement(element: Element): boolean { return element === (this as Element) || Boolean(this.shadowRoot?.contains(element)); }
+  /** Walk only same-document nodes and open shadow roots; iframe documents are deliberately not entered. */
+  private traverseOpenRoots(root: Document | ShadowRoot, depth = 0): HTMLElement[] {
+    if (depth > 20) return [];
+    const result: HTMLElement[] = [];
+    const visit = (node: Element): void => {
+      if (node instanceof HTMLElement && !['HTML', 'HEAD', 'BODY'].includes(node.tagName)) result.push(node);
+      if (node instanceof HTMLIFrameElement || node instanceof HTMLObjectElement) return;
+      for (const child of Array.from(node.children)) visit(child);
+      if (node.shadowRoot) for (const child of Array.from(node.shadowRoot.children)) visit(child);
+    };
+    for (const child of Array.from(root.children)) visit(child);
+    return result;
+  }
+  private parentOf(element: HTMLElement): HTMLElement | undefined {
+    return (element.parentElement ?? ((element.getRootNode() as ShadowRoot).host as HTMLElement | undefined));
+  }
+  private childOf(element: HTMLElement): HTMLElement | undefined {
+    return (element.shadowRoot?.firstElementChild ?? element.firstElementChild) as HTMLElement | undefined;
+  }
+  private ancestors(element: HTMLElement): HTMLElement[] { const result: HTMLElement[] = []; let current: HTMLElement | undefined = element; while (current && result.length < 12) { result.unshift(current); current = this.parentOf(current); } return result; }
+  private dataAncestor(element: HTMLElement, attribute: string): string | undefined { let current: HTMLElement | undefined = element; while (current) { const value = current.getAttribute(attribute); if (value) return value; current = this.parentOf(current); } return undefined; }
+  private contextFor(element: HTMLElement): { target?: string; component?: string; scope?: string } {
+    const scopeValue = this.dataAncestor(element, 'data-fd-scope');
+    const registration = this.config?.registrations?.find((item) => (item.scope ?? item.key) === scopeValue);
+    const targetValue = this.dataAncestor(element, 'data-fd-target');
+    const target = this.config?.targets?.some((item) => item.key === targetValue) ? targetValue : registration?.target;
+    return { target, component: registration ? (registration.label ?? registration.key) : undefined, scope: registration ? (registration.scope ?? scopeValue) : undefined };
+  }
   private pushHistory(): void { if (!this.state) return; this.history.push(structuredClone(this.state)); if (this.history.length > 30) this.history.shift(); this.future = []; }
   private beginControlInteraction(): void { if (!this.editingControl) { this.pushHistory(); this.editingControl = true; } }
   private endControlInteraction(): void { this.editingControl = false; }
   private undo(): void { if (!this.state || !this.history.length) return; this.future.push(structuredClone(this.state)); this.state = this.history.pop()!; this.render(); this.update(); }
   private redo(): void { if (!this.state || !this.future.length) return; this.history.push(structuredClone(this.state)); this.state = this.future.pop()!; this.render(); this.update(); }
-  private resumeVideo(entry: { video: HTMLVideoElement; paused: boolean; currentTime: number }): void {
+  private resumeVideo(entry: { video: HTMLVideoElement; currentTime: number }): void {
     const { video } = entry;
-    if (!video.isConnected || entry.paused) return;
+    if (!video.isConnected) return;
     try { video.currentTime = entry.currentTime; } catch { /* Media may have been detached or failed. */ }
     void video.play().catch(() => { /* Autoplay/media failures must not break unfreeze. */ });
   }
-  private toggleFreeze(): void {
-    this.frozen = !this.frozen;
-    if (this.frozen) {
-      this.frozenVideos = Array.from(document.querySelectorAll('video')).map((video) => {
-        let currentTime = 0;
-        try { currentTime = Number.isFinite(video.currentTime) ? video.currentTime : 0; } catch { /* Failed media can reject time reads. */ }
-        const entry = { video, paused: video.paused, currentTime };
-        if (!entry.paused) { try { video.pause(); } catch { /* A removed/failed media element is harmless. */ } }
-        return entry;
-      });
-      this.freezeStyle = document.createElement('style'); this.freezeStyle.textContent = '*,*::before,*::after{animation-play-state:paused!important;transition:none!important}'; document.head.append(this.freezeStyle); this.feedback('Motion frozen');
-    } else {
-      this.freezeStyle?.remove(); this.freezeStyle = undefined;
-      for (const entry of this.frozenVideos) this.resumeVideo(entry);
-      this.frozenVideos = []; this.feedback('Motion resumed');
-    }
+  private toggleFreeze(): void { this.frozen ? this.unfreezeMotion() : this.freezeMotion(); }
+  private freezeMotion(): void {
+    this.frozen = true;
+    this.frozenVideos = this.traverseOpenRoots(document).flatMap((element) => {
+      if (!(element instanceof HTMLVideoElement) || this.isToolElement(element)) return [];
+      try { if (element.paused) return []; const currentTime = Number.isFinite(element.currentTime) ? element.currentTime : 0; element.pause(); return [{ video: element, currentTime }]; } catch { return []; }
+    });
+    this.freezeStyles = [];
+    const css = '*,*::before,*::after{animation-play-state:paused!important;transition:none!important}';
+    const documentStyle = document.createElement('style'); documentStyle.dataset.fdFreeze = 'true'; documentStyle.textContent = css; (document.head ?? document.documentElement).append(documentStyle); this.freezeStyles.push(documentStyle);
+    for (const root of this.openShadowRoots(document)) { const style = document.createElement('style'); style.dataset.fdFreeze = 'true'; style.textContent = css; root.append(style); this.freezeStyles.push(style); }
+    this.feedback('Motion frozen');
+  }
+  private unfreezeMotion(): void {
+    if (!this.frozen && !this.freezeStyles.length) return;
+    this.frozen = false; for (const style of this.freezeStyles) style.remove(); this.freezeStyles = [];
+    for (const entry of this.frozenVideos) this.resumeVideo(entry); this.frozenVideos = []; this.feedback('Motion resumed');
+  }
+  private openShadowRoots(root: Document | ShadowRoot, depth = 0): ShadowRoot[] {
+    if (depth > 20) return []; const result: ShadowRoot[] = [];
+    const visit = (element: Element, level: number): void => { if (level > 20) return; if (element.shadowRoot) { result.push(element.shadowRoot); for (const child of Array.from(element.shadowRoot.children)) visit(child, level + 1); } if (!(element instanceof HTMLIFrameElement)) for (const child of Array.from(element.children)) visit(child, level + 1); };
+    for (const child of Array.from(root.children)) visit(child, depth); return result;
+  }
+  private persistSession(): void {
+    if (!this.config) return;
+    try {
+      const selected = this.selected ? annotationFor(this.selected, this.config, this.intent) : this.restoredSelection;
+      sessionStorage.setItem(`${this.storageKey}:session`, JSON.stringify({ selected, annotations: this.annotations.slice(0, 8), intent: this.intent.slice(0, 500) }));
+    } catch { /* Session storage is optional. */ }
+  }
+  private restoreSession(): void {
+    try {
+      const value: unknown = JSON.parse(sessionStorage.getItem(`${this.storageKey}:session`) ?? 'null');
+      if (!value || typeof value !== 'object') return;
+      const record = value as Record<string, unknown>;
+      const valid = (item: unknown): item is Annotation => {
+        if (!item || typeof item !== 'object') return false; const candidate = item as Record<string, unknown>;
+        const rect = candidate.rect;
+        const validRect = Boolean(rect && typeof rect === 'object' && ['x', 'y', 'width', 'height'].every((key) => Number.isFinite((rect as Record<string, unknown>)[key])));
+        return typeof candidate.route === 'string' && candidate.route.length <= 2048 && typeof candidate.selector === 'string' && candidate.selector.length <= 512 && validRect &&
+          (candidate.locale === undefined || (typeof candidate.locale === 'string' && candidate.locale.length <= 128)) &&
+          (candidate.target === undefined || (typeof candidate.target === 'string' && candidate.target.length <= 128)) &&
+          (candidate.component === undefined || (typeof candidate.component === 'string' && candidate.component.length <= 128)) &&
+          (candidate.scope === undefined || (typeof candidate.scope === 'string' && candidate.scope.length <= 128)) &&
+          (candidate.comment === undefined || (typeof candidate.comment === 'string' && candidate.comment.length <= 500));
+      };
+      if (valid(record.selected)) this.restoredSelection = record.selected;
+      if (Array.isArray(record.annotations)) this.annotations = record.annotations.filter(valid).slice(0, 8);
+      if (typeof record.intent === 'string') this.intent = record.intent.slice(0, 500);
+      if (this.restoredSelection?.selector) { try { const candidate = document.querySelector(this.restoredSelection.selector); if (candidate instanceof HTMLElement && !this.isToolElement(candidate)) this.selected = candidate; } catch { /* Invalid or stale selectors remain context-only. */ } }
+    } catch { /* Corrupt or unavailable storage is ignored. */ }
   }
   private async copy(value: string): Promise<void> {
     try {

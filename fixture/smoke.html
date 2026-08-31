@@ -144,6 +144,6 @@
   panel.style.left = '9999px'; panel.style.top = '9999px'; window.dispatchEvent(new Event('resize'));
   const resizeClamped = panel.getBoundingClientRect().right <= innerWidth && panel.getBoundingClientRect().bottom <= innerHeight;
   document.title = passed && initiallyCollapsed && opened && hidden && restoredCollapsed && shortcutOpened && feedback && copiedChanges && copiedBrief && originalApplied && modifiedRestored && emptyTarget && controlReset && marked && cleaned && picked && targetReset && fullReset
-    && groupedHistory && redoneHistory && videoState
+    && groupedHistory && redoneHistory && videoState && edgeSnap && resizeClamped
     ? 'FD browser PASS' : 'FD browser FAIL';
 </script>

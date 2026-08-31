@@ -84,7 +84,7 @@ Das Panel startet platzsparend eingeklappt. Es bietet Reset, Permalink-, JSON- u
 
 ## DOM-Inspector (V1)
 
-Im Development-Modus stehen `Inspect`, `Compose` und `Changes` zur Verfügung. `Pick DOM` wählt beliebige Elemente; registrierte Scopes/Targets liefern Kontext, während Layout-Fakten (Bounding Box, Display, Grid, Gap, Position und Overflow) read-only bleiben. Bis zu acht begrenzte Annotationen und ein optionaler Intent werden zusammen mit dem changes-only Diff als `Copy agent brief` exportiert. `Freeze motion`, Undo/Redo, Tastaturkürzel und Drag/Snap unterstützen die Arbeit auf der echten Seite. Es gibt keine Source-Writes, keine Agent-Bridge und keinen visuellen Recipe-Generator.
+Im Development-Modus stehen `Inspect`, `Compose` und `Changes` zur Verfügung. `Pick DOM` wählt beliebige Elemente; registrierte Scopes/Targets liefern Kontext, während Layout-Fakten (Bounding Box, Display, Grid, Gap, Position und Overflow) read-only bleiben. Bis zu acht begrenzte Annotationen und ein optionaler Intent werden zusammen mit dem changes-only Diff als `Copy agent brief` exportiert. `Freeze motion`, Undo/Redo, Tastaturkürzel und Drag/Snap unterstützen die Arbeit auf der echten Seite. Beim Auftauen kann eine laufende CSS-Transition browserbedingt nicht an ihrer exakten Zwischenposition fortgesetzt werden; fremde Inline-Styles werden dabei nicht verändert. Es gibt keine Source-Writes, keine Agent-Bridge und keinen visuellen Recipe-Generator.
 
 ## Entwicklung
 

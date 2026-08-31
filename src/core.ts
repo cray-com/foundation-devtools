@@ -479,8 +479,9 @@ export type Annotation = {
   comment?: string;
 };
 
-function safeRoute(value: string): string {
-  try { const url = new URL(value, 'http://localhost'); return `${url.pathname}${url.hash}`; } catch { return '/'; }
+/** Return only the route path; query strings and fragments never enter handoff data. */
+export function safeRoute(value: string): string {
+  try { const url = new URL(value, 'http://localhost'); return url.pathname || '/'; } catch { return '/'; }
 }
 function cssIdent(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, (char) => `\\${char.charCodeAt(0).toString(16)} `);
@@ -493,9 +494,14 @@ export function domPath(element: Element, limit = 8): string {
     const id = current.getAttribute('id');
     if (id && /^[a-zA-Z][\\w-]{0,63}$/.test(id)) part += `#${cssIdent(id)}`;
     else { const scope = current.getAttribute('data-fd-scope'); if (scope && scopePattern.test(scope)) part += `[data-fd-scope="${scope}"]`; }
-    parts.unshift(part); current = current.parentElement;
+    parts.unshift(part); current = current.parentElement ?? ((current.getRootNode() as ShadowRoot).host ?? null);
   }
   return parts.join(' > ').slice(0, 512);
+}
+function dataAncestor(element: Element, name: string): string | undefined {
+  let current: Element | null = element;
+  while (current) { const value = current.getAttribute(name); if (value) return value; current = current.parentElement ?? ((current.getRootNode() as ShadowRoot).host ?? null); }
+  return undefined;
 }
 export function layoutFacts(element: Element): LayoutFacts {
   const rect = element.getBoundingClientRect();
@@ -504,13 +510,14 @@ export function layoutFacts(element: Element): LayoutFacts {
   return { rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) }, display: style.display, gridColumns: style.gridTemplateColumns, gap: style.gap, position: style.position, overflow: style.overflow, ...(parent ? { container: parent.tagName.toLowerCase() } : {}), path: domPath(element) };
 }
 export function annotationFor(element: Element, config?: DevtoolsConfig, comment?: string): Annotation {
-  const scope = element.closest('[data-fd-scope]')?.getAttribute('data-fd-scope') ?? undefined;
-  const target = element.closest('[data-fd-target]')?.getAttribute('data-fd-target') ?? undefined;
-  const registered = config?.families.find((family) => (family.effect?.scope ?? family.key) === scope);
-  const registration = config?.registrations?.find((item) => (item.scope ?? item.key) === scope);
-  const rect = element.getBoundingClientRect();
+  const scopeValue = dataAncestor(element, 'data-fd-scope');
+  const targetValue = dataAncestor(element, 'data-fd-target');
+  const registration = config?.registrations?.find((item) => (item.scope ?? item.key) === scopeValue);
+  const target = config?.targets?.some((item) => item.key === targetValue) ? targetValue : undefined;
   const registrationTarget = registration?.target;
-  return { route: safeRoute(typeof location === 'undefined' ? '/' : location.href), ...(config?.metadata?.locale ? { locale: config.metadata.locale } : {}), ...(target || registrationTarget ? { target: target ?? registrationTarget } : {}), ...(registration ? { component: registration.label ?? registration.key } : registered ? { component: registered.key } : {}), ...(scope ? { scope } : {}), selector: domPath(element), rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) }, ...(comment ? { comment: comment.slice(0, 500) } : {}) };
+  const scope = registration ? (registration.scope ?? scopeValue) : undefined;
+  const rect = element.getBoundingClientRect();
+  return { route: safeRoute(typeof location === 'undefined' ? '/' : location.href), ...(config?.metadata?.locale ? { locale: config.metadata.locale } : {}), ...(target || registrationTarget ? { target: target ?? registrationTarget } : {}), ...(registration ? { component: registration.label ?? registration.key } : {}), ...(scope ? { scope } : {}), selector: domPath(element), rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) }, ...(comment ? { comment: comment.slice(0, 500) } : {}) };
 }
 export function recipeRegistry(config: DevtoolsConfig): readonly Recipe[] { return (config.recipes ?? []).map((item) => ({ ...item, state: validateState(config, item.state) })); }
 
