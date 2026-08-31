@@ -137,6 +137,12 @@ export function validateConfig(input: unknown): DevtoolsConfig {
 
   const names = new Set<string>();
   const families: Family[] = [];
+  const registrationKeys = new Set<string>();
+  for (const registration of (Array.isArray(input.registrations) ? input.registrations : [])) {
+    if (registrationKeys.has(registration.key as string) || (registration.target !== undefined && !targetKeys.has(registration.target as string))) fail('registration');
+    registrationKeys.add(registration.key as string);
+  }
+
   for (const familyValue of input.families) {
     if (!isRecord(familyValue) || typeof familyValue.key !== 'string' ||
         !keyPattern.test(familyValue.key) || names.has(familyValue.key) ||
@@ -474,8 +480,9 @@ export function annotationFor(element: Element, config?: DevtoolsConfig, comment
   const scope = element.closest('[data-fd-scope]')?.getAttribute('data-fd-scope') ?? undefined;
   const target = element.closest('[data-fd-target]')?.getAttribute('data-fd-target') ?? undefined;
   const registered = config?.families.find((family) => (family.effect?.scope ?? family.key) === scope);
+  const registration = config?.registrations?.find((item) => (item.scope ?? item.key) === scope);
   const rect = element.getBoundingClientRect();
-  return { route: safeRoute(typeof location === 'undefined' ? '/' : location.href), ...(config?.metadata?.locale ? { locale: config.metadata.locale } : {}), ...(target ? { target } : {}), ...(registered ? { component: registered.key } : {}), ...(scope ? { scope } : {}), selector: domPath(element), rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) }, ...(comment ? { comment: comment.slice(0, 500) } : {}) };
+  return { route: safeRoute(typeof location === 'undefined' ? '/' : location.href), ...(config?.metadata?.locale ? { locale: config.metadata.locale } : {}), ...(target ? { target } : {}), ...(registration ? { component: registration.label ?? registration.key } : registered ? { component: registered.key } : {}), ...(scope ? { scope } : {}), selector: domPath(element), rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) }, ...(comment ? { comment: comment.slice(0, 500) } : {}) };
 }
 export function handoff(config: DevtoolsConfig, state: DevtoolsState, selected?: Annotation, annotations: readonly Annotation[] = [], intent?: string): string {
   const diff = changes(config, state);

@@ -74,6 +74,7 @@ export class FoundationDevtoolsElement extends HTMLElement {
     const encoded = new URL(location.href).searchParams.get(this.config.queryKey ?? 'fd');
     this.state = decodeState(this.config, encoded);
     this.restorePanelMode();
+    this.restorePosition();
     try { const tab = localStorage.getItem(`${this.storageKey}:tab`); if (tab === 'inspect' || tab === 'compose' || tab === 'changes') this.activeTab = tab; } catch {}
     this.render();
     this.apply();
@@ -92,7 +93,7 @@ export class FoundationDevtoolsElement extends HTMLElement {
       </section>`;
     this.panel = root.querySelector('.panel')!;
     this.status = root.querySelector('.status')!;
-    this.panel.addEventListener('pointerdown', (event) => { if ((event.target as HTMLElement).closest('button,input,select')) return; this.panel!.setPointerCapture((event as PointerEvent).pointerId); const start = event as PointerEvent; const rect = this.panel!.getBoundingClientRect(); const move = (e: PointerEvent) => { this.panel!.style.left = `${Math.max(0, Math.min(innerWidth - rect.width, rect.left + e.clientX - start.clientX))}px`; this.panel!.style.top = `${Math.max(0, Math.min(innerHeight - rect.height, rect.top + e.clientY - start.clientY))}px`; this.panel!.style.right = 'auto'; this.panel!.style.bottom = 'auto'; }; const end = () => { this.panel!.removeEventListener('pointermove', move); this.panel!.removeEventListener('pointerup', end); }; this.panel!.addEventListener('pointermove', move); this.panel!.addEventListener('pointerup', end); });
+    this.panel.addEventListener('pointerdown', (event) => { if ((event.target as HTMLElement).closest('button,input,select')) return; this.panel!.setPointerCapture((event as PointerEvent).pointerId); const start = event as PointerEvent; const rect = this.panel!.getBoundingClientRect(); const move = (e: PointerEvent) => { this.panel!.style.left = `${Math.max(0, Math.min(innerWidth - rect.width, rect.left + e.clientX - start.clientX))}px`; this.panel!.style.top = `${Math.max(0, Math.min(innerHeight - rect.height, rect.top + e.clientY - start.clientY))}px`; this.panel!.style.right = 'auto'; this.panel!.style.bottom = 'auto'; }; const end = () => { this.panel!.removeEventListener('pointermove', move); this.panel!.removeEventListener('pointerup', end); const current = this.panel!.getBoundingClientRect(); const margin = 12; const left = current.left < innerWidth / 2 ? margin : Math.max(margin, innerWidth - current.width - margin); const top = current.top < innerHeight / 2 ? margin : Math.max(margin, innerHeight - current.height - margin); this.panel!.style.left = `${left}px`; this.panel!.style.top = `${top}px`; try { localStorage.setItem(`${this.storageKey}:position`, JSON.stringify({ left, top })); } catch {} }; this.panel!.addEventListener('pointermove', move); this.panel!.addEventListener('pointerup', end); });
     root.addEventListener('click', (event) => { const target = event.target as HTMLElement; this.action(target.dataset.action, target.dataset.control); });
     this.ready = true;
   }
@@ -281,6 +282,9 @@ export class FoundationDevtoolsElement extends HTMLElement {
     this.shadowRoot.querySelector<HTMLButtonElement>('[data-action="compare-modified"]')?.setAttribute('aria-pressed', String(this.compareMode === 'modified'));
   }
 
+  private restorePosition(): void {
+    try { const value = JSON.parse(localStorage.getItem(`${this.storageKey}:position`) ?? 'null'); if (value && Number.isFinite(value.left) && Number.isFinite(value.top)) { this.panel!.style.left = `${Math.max(0, Math.min(innerWidth - this.panel!.offsetWidth, value.left))}px`; this.panel!.style.top = `${Math.max(0, Math.min(innerHeight - this.panel!.offsetHeight, value.top))}px`; this.panel!.style.right = 'auto'; this.panel!.style.bottom = 'auto'; } } catch {}
+  }
   private restorePanelMode(): void {
     let mode: 'open' | 'collapsed' | 'hidden' = 'collapsed';
     try {
@@ -350,10 +354,11 @@ export class FoundationDevtoolsElement extends HTMLElement {
     if (action === 'undo') this.undo();
     if (action === 'redo') this.redo();
     if (action === 'reset-control' && controlKey) {
+      this.pushHistory();
       const control = this.config.controls?.find((item) => item.key === controlKey);
       if (control) { this.state.values[controlKey] = initialState(this.config).values[controlKey]; this.render(); this.update(); }
     }
-    if (action === 'reset-target' && controlKey) { this.state = resetBaseline(this.config, this.state, controlKey); this.render(); this.update(); }
+    if (action === 'reset-target' && controlKey) { this.pushHistory(); this.state = resetBaseline(this.config, this.state, controlKey); this.render(); this.update(); }
     if (action === 'changes') await this.copy(changesJson(this.config, this.state));
     if (action === 'brief') await this.copy(handoff(this.config, this.state, this.selected ? annotationFor(this.selected, this.config, this.intent) : undefined, this.annotations, this.intent));
     if (action === 'pick') { this.feedback('Pick a registered section or press Escape'); this.startPicker(); }
