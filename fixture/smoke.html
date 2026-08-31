@@ -20,6 +20,8 @@
     families: [{ key: 'card', label: 'Card', target: 'hero', effect: { scope: 'card', attribute: 'card-variant' }, variants: [
       { name: 'one' }, { name: 'two', defaults: { gap: 3 } },
     ] }],
+    compose: { recipes: ['wide-layout'], families: ['card'], controls: ['gap', 'density', 'featured'] },
+    recipes: [{ key: 'wide-layout', label: 'Wide layout', state: { families: { card: 'two' }, values: { gap: 3 } } }],
     controls: [
       { type: 'range', key: 'gap', label: 'Gap', min: 1, max: 4, default: 2, target: 'hero',
         unit: 'rem', effect: { scope: 'grid', variable: '--fd-gap' } },
@@ -86,6 +88,7 @@
   root.querySelector('[data-action="reset-control"][data-control="gap"]').click();
   const controlReset = grid.style.getPropertyValue('--fd-gap') === '2rem';
   range.value = '4'; range.dispatchEvent(new Event('input', { bubbles: true }));
+  range.dispatchEvent(new Event('change', { bubbles: true }));
 
   root.querySelector('[data-action="pick"]').click();
   const hero = document.querySelector('[data-fd-target="hero"]');
@@ -105,6 +108,42 @@
   range.focus();
   await new Promise((resolve) => setTimeout(resolve, 50));
   const feedback = ['Copied', 'Copy unavailable'].includes(root.querySelector('.status').textContent);
+
+  // One continuous range gesture is one history entry, and a single viewport edge is a valid snap.
+  const historyRange = root.querySelector('input[type="range"]');
+  historyRange.value = '4'; historyRange.dispatchEvent(new Event('input', { bubbles: true }));
+  historyRange.dispatchEvent(new Event('change', { bubbles: true }));
+  historyRange.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+  historyRange.value = '1'; historyRange.dispatchEvent(new Event('input', { bubbles: true }));
+  historyRange.value = '3'; historyRange.dispatchEvent(new Event('input', { bubbles: true }));
+  historyRange.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+  root.querySelector('[data-action="undo"]').click();
+  const groupedHistory = root.querySelector('input[type="range"]').value === '4';
+  root.querySelector('[data-action="redo"]').click();
+  const redoneHistory = root.querySelector('input[type="range"]').value === '3';
+  const panel = root.querySelector('.panel');
+  const panelRect = panel.getBoundingClientRect();
+  panel.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: panelRect.left + 20, clientY: panelRect.top + 20, pointerId: 7 }));
+  panel.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 1, clientY: panelRect.top + 80, pointerId: 7 }));
+  panel.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: 1, clientY: panelRect.top + 80, pointerId: 7 }));
+  const edgeSnap = panel.style.left === '0px' && panel.getBoundingClientRect().top >= 0;
+
+  const running = document.createElement('video'); const paused = document.createElement('video');
+  let runningPaused = false; let runningPlayed = false; let pausedPlayed = false;
+  Object.defineProperty(running, 'paused', { get: () => runningPaused });
+  Object.defineProperty(paused, 'paused', { get: () => true });
+  running.pause = () => { runningPaused = true; }; running.play = () => { runningPlayed = true; runningPaused = false; return Promise.resolve(); };
+  paused.play = () => { pausedPlayed = true; return Promise.resolve(); };
+  document.body.append(running, paused);
+  root.querySelector('[data-action="freeze"]').click();
+  const frozenVideos = runningPaused && !pausedPlayed;
+  paused.remove();
+  root.querySelector('[data-action="freeze"]').click();
+  const videoState = frozenVideos && runningPlayed;
+  running.remove();
+  panel.style.left = '9999px'; panel.style.top = '9999px'; window.dispatchEvent(new Event('resize'));
+  const resizeClamped = panel.getBoundingClientRect().right <= innerWidth && panel.getBoundingClientRect().bottom <= innerHeight;
   document.title = passed && initiallyCollapsed && opened && hidden && restoredCollapsed && shortcutOpened && feedback && copiedChanges && copiedBrief && originalApplied && modifiedRestored && emptyTarget && controlReset && marked && cleaned && picked && targetReset && fullReset
+    && groupedHistory && redoneHistory && videoState
     ? 'FD browser PASS' : 'FD browser FAIL';
 </script>

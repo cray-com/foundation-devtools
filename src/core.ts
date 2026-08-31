@@ -71,6 +71,11 @@ export type Family = {
   target?: string;
 };
 export type Recipe = { key: string; label: string; state: Partial<DevtoolsState>; description?: string };
+export type ComposeRegistration = {
+  recipes?: readonly string[];
+  families?: readonly string[];
+  controls?: readonly string[];
+};
 export type DevtoolsConfig = {
   project: string;
   families: readonly Family[];
@@ -78,6 +83,8 @@ export type DevtoolsConfig = {
   targets?: readonly Target[];
   registrations?: readonly DomRegistration[];
   recipes?: readonly Recipe[];
+  /** Explicit allow-list for the Compose view; omitted means nothing is composed. */
+  compose?: ComposeRegistration;
   metadata?: Metadata;
   queryKey?: string;
 };
@@ -98,6 +105,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function fail(message: string): never {
   throw new Error(`Invalid devtools config: ${message}`);
+}
+
+function validateCompose(value: unknown): asserts value is ComposeRegistration {
+  if (!isRecord(value) || Object.keys(value).some((key) => !['recipes', 'families', 'controls'].includes(key))) fail('compose');
+  for (const key of ['recipes', 'families', 'controls'] as const) {
+    const values = value[key];
+    if (values !== undefined && (!Array.isArray(values) || values.some((item) => typeof item !== 'string' || !keyPattern.test(item)))) fail('compose');
+  }
 }
 
 function validateEffect(effect: unknown): asserts effect is Effect {
@@ -124,6 +139,7 @@ export function validateConfig(input: unknown): DevtoolsConfig {
   if (input.targets !== undefined && !Array.isArray(input.targets)) fail('targets');
   if (input.registrations !== undefined && (!Array.isArray(input.registrations) || input.registrations.some((item) => !isRecord(item) || typeof item.key !== 'string' || !keyPattern.test(item.key) || (item.label !== undefined && typeof item.label !== 'string') || (item.scope !== undefined && (typeof item.scope !== 'string' || !scopePattern.test(item.scope))) || (item.target !== undefined && typeof item.target !== 'string')))) fail('registrations');
   if (input.recipes !== undefined && (!Array.isArray(input.recipes) || input.recipes.some((item) => !isRecord(item) || typeof item.key !== 'string' || !keyPattern.test(item.key) || typeof item.label !== 'string' || !isRecord(item.state)))) fail('recipes');
+  if (input.compose !== undefined) validateCompose(input.compose);
   const targets: Target[] = [];
   const targetKeys = new Set<string>();
   for (const targetValue of (Array.isArray(input.targets) ? input.targets : [])) {
@@ -219,6 +235,14 @@ export function validateConfig(input: unknown): DevtoolsConfig {
   }
 
   const config = { ...input, families, controls } as unknown as DevtoolsConfig;
+  if (config.compose) {
+    const recipeKeys = new Set((config.recipes ?? []).map((item) => item.key));
+    const familyKeys = new Set(config.families.map((item) => item.key));
+    const controlKeys = new Set((config.controls ?? []).map((item) => item.key));
+    for (const key of config.compose.recipes ?? []) if (!recipeKeys.has(key)) fail('compose recipe');
+    for (const key of config.compose.families ?? []) if (!familyKeys.has(key)) fail('compose family');
+    for (const key of config.compose.controls ?? []) if (!controlKeys.has(key)) fail('compose control');
+  }
   for (const family of config.families) {
     for (const variant of family.variants) {
       for (const controlKey of Object.keys(variant.defaults ?? {})) {

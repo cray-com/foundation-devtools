@@ -56,7 +56,7 @@ export class FoundationDevtoolsElement extends HTMLElement {
   private future: DevtoolsState[] = [];
   private editingControl = false;
   private frozen = false;
-  private frozenVideos: HTMLVideoElement[] = [];
+  private frozenVideos: Array<{ video: HTMLVideoElement; paused: boolean; currentTime: number }> = [];
   private freezeStyle?: HTMLStyleElement;
 
   connectedCallback(): void {
@@ -69,9 +69,11 @@ export class FoundationDevtoolsElement extends HTMLElement {
   disconnectedCallback(): void {
     document.removeEventListener('keydown', this.recover);
     document.removeEventListener('keydown', this.toolKeys);
+    window.removeEventListener('resize', this.clampPanel);
     this.pickerCleanup?.(); this.pickerCleanup = undefined;
     this.freezeStyle?.remove(); this.freezeStyle = undefined;
-    for (const video of this.frozenVideos) void video.play().catch(() => {}); this.frozenVideos = [];
+    for (const entry of this.frozenVideos) this.resumeVideo(entry);
+    this.frozenVideos = [];
   }
 
   configure(config: DevtoolsConfig): void {
@@ -99,7 +101,22 @@ export class FoundationDevtoolsElement extends HTMLElement {
       </section>`;
     this.panel = root.querySelector('.panel')!;
     this.status = root.querySelector('.status')!;
-    this.panel.addEventListener('pointerdown', (event) => { if ((event.target as HTMLElement).closest('button,input,select')) return; this.panel!.setPointerCapture((event as PointerEvent).pointerId); const start = event as PointerEvent; const rect = this.panel!.getBoundingClientRect(); const move = (e: PointerEvent) => { this.panel!.style.left = `${Math.max(0, Math.min(innerWidth - rect.width, rect.left + e.clientX - start.clientX))}px`; this.panel!.style.top = `${Math.max(0, Math.min(innerHeight - rect.height, rect.top + e.clientY - start.clientY))}px`; this.panel!.style.right = 'auto'; this.panel!.style.bottom = 'auto'; }; const end = () => { this.panel!.removeEventListener('pointermove', move); this.panel!.removeEventListener('pointerup', end); this.panel!.removeEventListener('pointercancel', end); const current = this.panel!.getBoundingClientRect(); const margin = 12; const left = current.left < innerWidth / 2 ? margin : Math.max(margin, innerWidth - current.width - margin); const top = current.top < innerHeight / 2 ? margin : Math.max(margin, innerHeight - current.height - margin); this.panel!.style.left = `${left}px`; this.panel!.style.top = `${top}px`; try { localStorage.setItem(`${this.storageKey}:position`, JSON.stringify({ left, top })); } catch {} }; this.panel!.addEventListener('pointermove', move); this.panel!.addEventListener('pointerup', end); this.panel!.addEventListener('pointercancel', end); });
+    this.panel.addEventListener('pointerdown', (event) => {
+      if ((event.target as HTMLElement).closest('button,input,select')) return;
+      try { this.panel!.setPointerCapture((event as PointerEvent).pointerId); } catch { /* Synthetic or cancelled pointers need no capture. */ }
+      const start = event as PointerEvent; const rect = this.panel!.getBoundingClientRect();
+      const move = (e: PointerEvent) => this.setPanelPosition(rect.left + e.clientX - start.clientX, rect.top + e.clientY - start.clientY);
+      const end = () => {
+        this.panel!.removeEventListener('pointermove', move); this.panel!.removeEventListener('pointerup', end); this.panel!.removeEventListener('pointercancel', end);
+        const current = this.panel!.getBoundingClientRect(); const edge = 24;
+        const left = Math.abs(current.left) <= edge ? 0 : Math.abs(innerWidth - current.right) <= edge ? innerWidth - current.width : current.left;
+        const top = Math.abs(current.top) <= edge ? 0 : Math.abs(innerHeight - current.bottom) <= edge ? innerHeight - current.height : current.top;
+        this.setPanelPosition(left, top); this.savePanelPosition(left, top);
+      };
+      this.panel!.addEventListener('pointermove', move); this.panel!.addEventListener('pointerup', end); this.panel!.addEventListener('pointercancel', end);
+    });
+    window.addEventListener('resize', this.clampPanel);
+
     root.addEventListener('click', (event) => { const target = event.target as HTMLElement; this.action(target.dataset.action, target.dataset.control); });
     this.ready = true;
   }
@@ -133,7 +150,8 @@ export class FoundationDevtoolsElement extends HTMLElement {
     body.replaceChildren();
     if (this.activeTab === 'inspect') { this.renderInspect(body); return; }
     if (this.activeTab === 'changes') { this.renderChanges(body); return; }
-    const recipes = recipeRegistry(this.config);
+    const compose = this.config.compose;
+    const recipes = recipeRegistry(this.config).filter((item) => compose?.recipes?.includes(item.key));
     if (recipes.length) { const chooser = document.createElement('div'); chooser.className = 'recipes'; for (const item of recipes) { const button = document.createElement('button'); button.textContent = item.label; button.title = item.description ?? ''; button.onclick = () => { const next = validateState(this.config!, item.state); this.pushHistory(); this.state = next; this.render(); this.update(); }; chooser.append(button); } body.append(chooser); }
     const compare = document.createElement('div'); compare.className = 'compare';
     compare.innerHTML = '<button data-action="compare-original" aria-pressed="false">Original</button><button data-action="compare-modified" aria-pressed="true">Modified</button>';
@@ -163,7 +181,7 @@ export class FoundationDevtoolsElement extends HTMLElement {
     }
     let rendered = 0;
     for (const family of this.config.families) {
-      if (this.selectedTarget && family.target !== this.selectedTarget) continue;
+      if (!compose?.families?.includes(family.key) || (this.selectedTarget && family.target !== this.selectedTarget)) continue;
       rendered++;
       const select = document.createElement('select');
       select.id = `fd-family-${family.key}`;
@@ -181,7 +199,7 @@ export class FoundationDevtoolsElement extends HTMLElement {
       row.dataset.changeKey = family.key; row.classList.toggle('changed', changedKeys.has(family.key));
       body.append(row);
     }
-    for (const control of this.config.controls ?? []) { if (!this.selectedTarget || control.target === this.selectedTarget) { rendered++; body.append(this.control(control)); } }
+    for (const control of this.config.controls ?? []) { if (compose?.controls?.includes(control.key) && (!this.selectedTarget || control.target === this.selectedTarget)) { rendered++; body.append(this.control(control)); } }
     if (this.selectedTarget && rendered === 0) { const empty = document.createElement('p'); empty.textContent = 'Keine Controls für dieses Target.'; body.append(empty); }
     const metadata = Object.entries(this.config.metadata ?? {}).map(([key, value]) => `${key}: ${value}`).join(' · ');
     this.shadowRoot!.querySelector('.meta')!.textContent = `${this.config.project}${metadata ? ` · ${metadata}` : ''}`;
@@ -212,13 +230,16 @@ export class FoundationDevtoolsElement extends HTMLElement {
       range.step = String(control.step ?? 1);
       range.value = String(this.state!.values[control.key]);
       output.textContent = this.rangeText(control, range.value);
+      range.addEventListener('pointerdown', () => this.beginControlInteraction());
+      range.addEventListener('pointerup', () => this.endControlInteraction());
+      range.addEventListener('pointercancel', () => this.endControlInteraction());
+      range.addEventListener('keydown', (event) => { if (event.key.startsWith('Arrow') || event.key === 'Home' || event.key === 'End') this.beginControlInteraction(); });
+      range.addEventListener('keyup', (event) => { if (event.key.startsWith('Arrow') || event.key === 'Home' || event.key === 'End') this.endControlInteraction(); });
       range.addEventListener('input', () => {
-        if (!this.editingControl) { this.pushHistory(); this.editingControl = true; }
-        this.state!.values[control.key] = Number(range.value);
-        output.textContent = this.rangeText(control, range.value);
-        this.update();
+        this.beginControlInteraction(); this.state!.values[control.key] = Number(range.value);
+        output.textContent = this.rangeText(control, range.value); this.update();
       });
-      range.addEventListener('change', () => { this.editingControl = false; });
+      range.addEventListener('change', () => this.endControlInteraction());
     } else if (control.type === 'toggle') {
       const toggle = input as HTMLInputElement;
       toggle.type = 'checkbox';
@@ -251,9 +272,11 @@ export class FoundationDevtoolsElement extends HTMLElement {
 
   private availableForTarget(target: string): number {
     if (!this.config) return 0;
-    if (target === 'all') return this.config.families.length + (this.config.controls ?? []).length;
-    return this.config.families.filter((item) => item.target === target).length
-      + (this.config.controls ?? []).filter((item) => item.target === target).length;
+    const compose = this.config.compose;
+    const families = this.config.families.filter((item) => compose?.families?.includes(item.key));
+    const controls = (this.config.controls ?? []).filter((item) => compose?.controls?.includes(item.key));
+    if (target === 'all') return families.length + controls.length;
+    return families.filter((item) => item.target === target).length + controls.filter((item) => item.target === target).length;
   }
 
   private changedForTarget(target: string): number {
@@ -291,6 +314,15 @@ export class FoundationDevtoolsElement extends HTMLElement {
     this.shadowRoot.querySelector<HTMLButtonElement>('[data-action="compare-modified"]')?.setAttribute('aria-pressed', String(this.compareMode === 'modified'));
   }
 
+  private setPanelPosition(left: number, top: number): void {
+    if (!this.panel) return;
+    const rect = this.panel.getBoundingClientRect();
+    const maxLeft = Math.max(0, innerWidth - rect.width); const maxTop = Math.max(0, innerHeight - rect.height);
+    this.panel.style.left = `${Math.max(0, Math.min(maxLeft, left))}px`; this.panel.style.top = `${Math.max(0, Math.min(maxTop, top))}px`;
+    this.panel.style.right = 'auto'; this.panel.style.bottom = 'auto';
+  }
+  private savePanelPosition(left: number, top: number): void { try { localStorage.setItem(`${this.storageKey}:position`, JSON.stringify({ left, top })); } catch {} }
+  private clampPanel = (): void => { if (!this.panel) return; const rect = this.panel.getBoundingClientRect(); this.setPanelPosition(rect.left, rect.top); };
   private restorePosition(): void {
     try { const value = JSON.parse(localStorage.getItem(`${this.storageKey}:position`) ?? 'null'); if (value && Number.isFinite(value.left) && Number.isFinite(value.top)) { this.panel!.style.left = `${Math.max(0, Math.min(innerWidth - this.panel!.offsetWidth, value.left))}px`; this.panel!.style.top = `${Math.max(0, Math.min(innerHeight - this.panel!.offsetHeight, value.top))}px`; this.panel!.style.right = 'auto'; this.panel!.style.bottom = 'auto'; } } catch {}
   }
@@ -419,12 +451,32 @@ export class FoundationDevtoolsElement extends HTMLElement {
 
   private isToolElement(element: Element): boolean { return element === (this as Element) || Boolean(this.shadowRoot?.contains(element)); }
   private pushHistory(): void { if (!this.state) return; this.history.push(structuredClone(this.state)); if (this.history.length > 30) this.history.shift(); this.future = []; }
+  private beginControlInteraction(): void { if (!this.editingControl) { this.pushHistory(); this.editingControl = true; } }
+  private endControlInteraction(): void { this.editingControl = false; }
   private undo(): void { if (!this.state || !this.history.length) return; this.future.push(structuredClone(this.state)); this.state = this.history.pop()!; this.render(); this.update(); }
   private redo(): void { if (!this.state || !this.future.length) return; this.history.push(structuredClone(this.state)); this.state = this.future.pop()!; this.render(); this.update(); }
+  private resumeVideo(entry: { video: HTMLVideoElement; paused: boolean; currentTime: number }): void {
+    const { video } = entry;
+    if (!video.isConnected || entry.paused) return;
+    try { video.currentTime = entry.currentTime; } catch { /* Media may have been detached or failed. */ }
+    void video.play().catch(() => { /* Autoplay/media failures must not break unfreeze. */ });
+  }
   private toggleFreeze(): void {
     this.frozen = !this.frozen;
-    if (this.frozen) { this.frozenVideos = Array.from(document.querySelectorAll('video')).filter((video) => !video.paused); this.freezeStyle = document.createElement('style'); this.freezeStyle.textContent = '*,*::before,*::after{animation-play-state:paused!important;transition:none!important}'; document.head.append(this.freezeStyle); for (const video of this.frozenVideos) video.pause(); this.feedback('Motion frozen'); }
-    else { this.freezeStyle?.remove(); this.freezeStyle = undefined; for (const video of this.frozenVideos) void video.play().catch(() => {}); this.frozenVideos = []; this.feedback('Motion resumed'); }
+    if (this.frozen) {
+      this.frozenVideos = Array.from(document.querySelectorAll('video')).map((video) => {
+        let currentTime = 0;
+        try { currentTime = Number.isFinite(video.currentTime) ? video.currentTime : 0; } catch { /* Failed media can reject time reads. */ }
+        const entry = { video, paused: video.paused, currentTime };
+        if (!entry.paused) { try { video.pause(); } catch { /* A removed/failed media element is harmless. */ } }
+        return entry;
+      });
+      this.freezeStyle = document.createElement('style'); this.freezeStyle.textContent = '*,*::before,*::after{animation-play-state:paused!important;transition:none!important}'; document.head.append(this.freezeStyle); this.feedback('Motion frozen');
+    } else {
+      this.freezeStyle?.remove(); this.freezeStyle = undefined;
+      for (const entry of this.frozenVideos) this.resumeVideo(entry);
+      this.frozenVideos = []; this.feedback('Motion resumed');
+    }
   }
   private async copy(value: string): Promise<void> {
     try {
