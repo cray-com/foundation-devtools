@@ -7,7 +7,7 @@
 </style>
 <main class="grid" data-fd-target="hero" data-fd-scope="grid"><article data-fd-scope="card">Card</article><article data-fd-scope="card">Card</article></main>
 <aside data-fd-target="hero" data-fd-scope="grid">Second registered hero target</aside>
-<section data-fd-target="notes">Notes</section>
+<section data-fd-target="notes">Notes</section><div id="shadow-host"></div>
 <script type="module">
   window.addEventListener('error', (event) => { document.title = `FD error ${event.message}`; });
   import { defineDevtoolsElement } from '../dist/element.js';
@@ -31,6 +31,10 @@
         effect: { scope: 'card', attribute: 'featured' } },
     ],
   };
+  const shadowHost = document.querySelector('#shadow-host');
+  const shadow = shadowHost.attachShadow({ mode: 'open' });
+  shadow.innerHTML = '<section data-fd-target="shadow" data-fd-scope="grid"><button>Shadow target</button></section>';
+  config.targets.push({ key: 'shadow', label: 'Shadow', kind: 'section' });
   const element = defineDevtoolsElement(config);
   document.body.append(element);
   await new Promise((resolve) => queueMicrotask(resolve));
@@ -38,7 +42,9 @@
   const [variant, density] = root.querySelectorAll('select');
   const range = root.querySelector('input[type="range"]');
   const toggle = root.querySelector('input[type="checkbox"]');
-  const initiallyCollapsed = root.querySelector('.panel').classList.contains('collapsed');
+  const initiallyOpen = !root.querySelector('.panel').classList.contains('collapsed');
+  root.querySelector('[data-action="collapse"]').click();
+  const collapsed = root.querySelector('.panel').classList.contains('collapsed');
   root.querySelector('[data-action="collapse"]').click();
   const opened = !root.querySelector('.panel').classList.contains('collapsed');
   variant.value = 'two';
@@ -65,11 +71,15 @@
     new URL(location.href).searchParams.has('fd');
   root.querySelector('[data-action="hide"]').click();
   const hidden = root.querySelector('.panel').classList.contains('hidden');
+  const hideNotPersisted = localStorage.getItem('foundation-devtools:fixture:panel') === 'open';
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', ctrlKey: true, shiftKey: true }));
   const restoredCollapsed = !root.querySelector('.panel').classList.contains('hidden') &&
     root.querySelector('.panel').classList.contains('collapsed');
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', ctrlKey: true, shiftKey: true }));
   const shortcutOpened = !root.querySelector('.panel').classList.contains('collapsed');
+  const shadowMap = root.querySelector('[data-map-target="shadow"]');
+  shadowMap.click();
+  const shadowRevealed = shadow.querySelector('[data-fd-target="shadow"]').style.outline !== '';
   root.querySelector('[data-action="changes"]').click();
   await new Promise((resolve) => setTimeout(resolve, 50));
   const copiedChanges = ['Copied', 'Copy unavailable'].includes(root.querySelector('.status').textContent);
@@ -92,6 +102,12 @@
 
   root.querySelector('[data-action="pick"]').click();
   const hero = document.querySelector('[data-fd-target="hero"]');
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
+  hero.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }));
+  const pickerSuspended = hero.style.outline === '';
+  document.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true }));
+  hero.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }));
+  const pickerResumed = hero.style.outline !== '';
   hero.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }));
   const marked = hero.style.outline !== '';
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
@@ -99,6 +115,11 @@
   root.querySelector('[data-action="pick"]').click();
   hero.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
   const picked = root.querySelector('[data-map-target="hero"]').getAttribute('aria-pressed') === 'true' && hero.style.outline === '' && !hero.hasAttribute('tabindex');
+  root.querySelector('[data-action="tab-inspect"]').click();
+  root.querySelector('[data-action="tab-inspect"]')?.focus();
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: '2', shiftKey: true, bubbles: true }));
+  const shiftTwoFocused = document.activeElement === hero;
+  root.querySelector('[data-action="tab-compose"]').click();
   root.querySelector('[data-action="reset-target"]').click();
   const targetReset = grid.style.getPropertyValue('--fd-gap') === '2rem' && card.getAttribute('data-card-variant') === 'one';
   root.querySelector('[data-action="reset"]').click();
@@ -143,7 +164,7 @@
   running.remove();
   panel.style.left = '9999px'; panel.style.top = '9999px'; window.dispatchEvent(new Event('resize'));
   const resizeClamped = panel.getBoundingClientRect().right <= innerWidth && panel.getBoundingClientRect().bottom <= innerHeight;
-  document.title = passed && initiallyCollapsed && opened && hidden && restoredCollapsed && shortcutOpened && feedback && copiedChanges && copiedBrief && originalApplied && modifiedRestored && emptyTarget && controlReset && marked && cleaned && picked && targetReset && fullReset
+  document.title = passed && initiallyOpen && collapsed && opened && hidden && hideNotPersisted && restoredCollapsed && shortcutOpened && shadowRevealed && feedback && copiedChanges && copiedBrief && originalApplied && modifiedRestored && emptyTarget && controlReset && marked && pickerSuspended && pickerResumed && cleaned && picked && shiftTwoFocused && targetReset && fullReset
     && groupedHistory && redoneHistory && videoState && edgeSnap && resizeClamped
     ? 'FD browser PASS' : 'FD browser FAIL';
 </script>

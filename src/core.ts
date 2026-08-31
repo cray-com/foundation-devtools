@@ -327,6 +327,11 @@ export function stateUrl(config: DevtoolsConfig, state: DevtoolsState, url?: str
   return result.toString();
 }
 
+function redactedMetadata(metadata?: Metadata): Metadata | undefined {
+  if (!metadata) return undefined;
+  return { ...metadata, ...(metadata.route !== undefined ? { route: safeRoute(metadata.route) } : {}) };
+}
+
 function kebab(value: string): string {
   return value.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase();
 }
@@ -410,7 +415,8 @@ export function changes(config: DevtoolsConfig, state: DevtoolsState, baseline: 
     if (from !== to) { const target = control.target ? targetMap.get(control.target) : undefined;
       result.push({ key: control.key, label: control.label, kind: 'control', from, to, ...(control.target ? { target: control.target, targetKind: target?.kind } : {}), ...(control.classification ? { classification: control.classification } : {}) }); }
   }
-  return { project: config.project, ...(config.metadata ? { metadata: config.metadata } : {}), changes: result, count: result.length };
+  const metadata = redactedMetadata(config.metadata);
+  return { project: config.project, ...(metadata ? { metadata } : {}), changes: result, count: result.length };
 }
 
 export function changesJson(config: DevtoolsConfig, state: DevtoolsState, baseline?: DevtoolsState): string {
@@ -419,9 +425,10 @@ export function changesJson(config: DevtoolsConfig, state: DevtoolsState, baseli
 
 export function agentBrief(config: DevtoolsConfig, state: DevtoolsState, baseline?: DevtoolsState): string {
   const diff = changes(config, state, baseline);
-  if (!diff.count) return `# ${config.project} changes\n\nNo changes.`;
+  const metadata = diff.metadata ? `\n\n## Metadata\n\n\`${JSON.stringify(diff.metadata)}\`` : '';
+  if (!diff.count) return `# ${config.project} changes${metadata}\n\nNo changes.`;
   const lines = diff.changes.map((item) => `- **${item.label}** (${item.kind}${item.target ? `, target: ${item.target}` : ''}${item.classification ? `, ${item.classification}` : ''}): \`${String(item.from)}\` → \`${String(item.to)}\``);
-  return `# ${config.project} changes\n\n${lines.join('\n')}`;
+  return `# ${config.project} changes${metadata}\n\n${lines.join('\n')}`;
 }
 
 /** Return a fresh state baseline; useful for scoped reset controls. */

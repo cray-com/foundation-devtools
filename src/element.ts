@@ -55,6 +55,8 @@ export class FoundationDevtoolsElement extends HTMLElement {
   private history: DevtoolsState[] = [];
   private future: DevtoolsState[] = [];
   private editingControl = false;
+  private controlInteractionStart?: DevtoolsState;
+  private pickerSuspended = false;
   private frozen = false;
   private frozenVideos: Array<{ video: HTMLVideoElement; currentTime: number }> = [];
   private freezeStyles: HTMLStyleElement[] = [];
@@ -130,7 +132,16 @@ export class FoundationDevtoolsElement extends HTMLElement {
     const focused = this.shadowRoot?.activeElement || document.activeElement;
     const inTool = focused === (this as Element) || Boolean(focused && this.shadowRoot?.contains(focused));
     if (!inTool && !this.pickerCleanup) return;
-    if (event.key === '1' || event.key === '2' || event.key === '3') { this.activeTab = ({ '1': 'inspect', '2': 'compose', '3': 'changes' } as const)[event.key]; this.render(); }
+    if (event.shiftKey && event.key === '2' && this.selected) {
+      event.preventDefault();
+      this.selected.scrollIntoView({ block: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+      if (!this.selected.hasAttribute('tabindex')) this.selected.tabIndex = -1;
+      this.selected.focus({ preventScroll: true });
+      this.markSelected();
+    } else if (event.key === ' ' && this.pickerCleanup) {
+      event.preventDefault();
+      this.pickerSuspended = true;
+    } else if (event.key === '1' || event.key === '2' || event.key === '3') { this.activeTab = ({ '1': 'inspect', '2': 'compose', '3': 'changes' } as const)[event.key]; this.render(); }
     else if (event.key.toLowerCase() === 'i') this.startPicker();
     else if (event.key.toLowerCase() === 'v') this.pickerCleanup?.();
     else if (event.key === '[' && this.selected?.parentElement) { this.selected = this.selected.parentElement; this.render(); }
@@ -302,7 +313,7 @@ export class FoundationDevtoolsElement extends HTMLElement {
   }
 
   private revealTarget(key: string): void {
-    const section = document.querySelector<HTMLElement>(`[data-fd-target="${CSS.escape(key)}"]`);
+    const section = this.traverseOpenRoots(document).find((element) => element.getAttribute('data-fd-target') === key);
     if (!section) return;
     section.scrollIntoView({ block: 'nearest', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
     const previous = section.style.outline;
@@ -335,12 +346,12 @@ export class FoundationDevtoolsElement extends HTMLElement {
     try { const value = JSON.parse(localStorage.getItem(`${this.storageKey}:position`) ?? 'null'); if (value && Number.isFinite(value.left) && Number.isFinite(value.top)) { this.panel!.style.left = `${Math.max(0, Math.min(innerWidth - this.panel!.offsetWidth, value.left))}px`; this.panel!.style.top = `${Math.max(0, Math.min(innerHeight - this.panel!.offsetHeight, value.top))}px`; this.panel!.style.right = 'auto'; this.panel!.style.bottom = 'auto'; } } catch {}
   }
   private restorePanelMode(): void {
-    let mode: 'open' | 'collapsed' | 'hidden' = 'collapsed';
+    let mode: 'open' | 'collapsed' = 'open';
     try {
       const stored = localStorage.getItem(this.storageKey);
-      if (stored === 'open' || stored === 'collapsed' || stored === 'hidden') mode = stored;
+      if (stored === 'open' || stored === 'collapsed') mode = stored;
     } catch {
-      // Storage is optional. The dense collapsed state remains the default.
+      // Storage is optional. An open panel remains the first-start default.
     }
     this.setPanelMode(mode, false);
   }
@@ -356,7 +367,7 @@ export class FoundationDevtoolsElement extends HTMLElement {
       button.ariaLabel = expanded ? 'Panel einklappen' : 'Panel öffnen';
       button.ariaExpanded = String(expanded);
     }
-    if (persist) {
+    if (persist && mode !== 'hidden') {
       try { localStorage.setItem(this.storageKey, mode); } catch { /* Storage is optional. */ }
     }
   }
@@ -435,9 +446,14 @@ export class FoundationDevtoolsElement extends HTMLElement {
     let hovered: HTMLElement | undefined;
     const listeners = new Map<HTMLElement, { enter: () => void; leave: () => void; focus: () => void; key: (event: KeyboardEvent) => void }>();
     const clearMark = () => { if (hovered) { hovered.style.outline = oldOutline.get(hovered) ?? ''; hovered = undefined; } };
-    const mark = (element: HTMLElement) => { clearMark(); oldOutline.set(element, element.style.outline); hovered = element; element.style.outline = '2px solid #8f98a3'; };
-    const select = (element: HTMLElement, event: Event) => { event.preventDefault(); event.stopImmediatePropagation(); this.selected = element; this.restoredSelection = annotationFor(element, this.config, this.intent); this.selectedTarget = this.dataAncestor(element, 'data-fd-target'); if ((event as MouseEvent).shiftKey && this.annotations.length < 8) this.annotations.push(annotationFor(element, this.config, this.intent)); else { cleanup(); this.render(); } };
+    const mark = (element: HTMLElement) => { if (this.pickerSuspended) return; clearMark(); oldOutline.set(element, element.style.outline); hovered = element; element.style.outline = '2px solid #8f98a3'; };
+    const select = (element: HTMLElement, event: Event) => {
+      if (this.pickerSuspended) return;
+      event.preventDefault(); event.stopImmediatePropagation(); this.selected = element; this.restoredSelection = annotationFor(element, this.config, this.intent); this.selectedTarget = this.dataAncestor(element, 'data-fd-target'); if ((event as MouseEvent).shiftKey && this.annotations.length < 8) this.annotations.push(annotationFor(element, this.config, this.intent)); else { cleanup(); this.render(); } };
     const cleanup = () => {
+      this.pickerSuspended = false;
+      document.removeEventListener('keyup', onDocumentKeyup);
+      window.removeEventListener('blur', onBlur);
       clearMark();
       elements.forEach((element) => {
         element.removeEventListener('click', onClick);
@@ -450,18 +466,28 @@ export class FoundationDevtoolsElement extends HTMLElement {
       this.pickerCleanup = undefined;
     };
     const onClick = (event: Event) => select(event.currentTarget as HTMLElement, event);
-    const onDocumentKey = (event: KeyboardEvent) => { if (event.key === 'Escape') cleanup(); };
+    const onDocumentKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') cleanup();
+      else if (event.key === ' ') { event.preventDefault(); this.pickerSuspended = true; }
+    };
+    const onDocumentKeyup = (event: KeyboardEvent) => { if (event.key === ' ') { event.preventDefault(); this.pickerSuspended = false; } };
+    const onBlur = () => { this.pickerSuspended = false; cleanup(); };
     elements.forEach((element) => {
       const enter = () => mark(element);
       const leave = () => { if (hovered === element) clearMark(); };
       const focus = () => mark(element);
-      const key = (event: KeyboardEvent) => { if (event.key === 'Enter' || event.key === ' ') select(element, event); };
+      const key = (event: KeyboardEvent) => {
+        if (event.key === ' ') { event.preventDefault(); this.pickerSuspended = true; return; }
+        if (event.key === 'Enter') select(element, event);
+      };
       listeners.set(element, { enter, leave, focus, key });
       oldTabIndex.set(element, element.getAttribute('tabindex'));
       element.tabIndex = 0;
       element.addEventListener('pointerenter', enter); element.addEventListener('pointerleave', leave); element.addEventListener('focus', focus); element.addEventListener('keydown', key); element.addEventListener('click', onClick);
     });
     document.addEventListener('keydown', onDocumentKey);
+    document.addEventListener('keyup', onDocumentKeyup);
+    window.addEventListener('blur', onBlur);
     this.pickerCleanup = cleanup;
     elements[0]?.focus({ preventScroll: true });
   }
@@ -495,9 +521,17 @@ export class FoundationDevtoolsElement extends HTMLElement {
     const target = this.config?.targets?.some((item) => item.key === targetValue) ? targetValue : registration?.target;
     return { target, component: registration ? (registration.label ?? registration.key) : undefined, scope: registration ? (registration.scope ?? scopeValue) : undefined };
   }
-  private pushHistory(): void { if (!this.state) return; this.history.push(structuredClone(this.state)); if (this.history.length > 30) this.history.shift(); this.future = []; }
-  private beginControlInteraction(): void { if (!this.editingControl) { this.pushHistory(); this.editingControl = true; } }
-  private endControlInteraction(): void { this.editingControl = false; }
+  private pushHistory(snapshot: DevtoolsState = this.state!): void { this.history.push(structuredClone(snapshot)); if (this.history.length > 30) this.history.shift(); this.future = []; }
+  private beginControlInteraction(): void {
+    if (!this.state || this.editingControl) return;
+    this.controlInteractionStart = structuredClone(this.state);
+    this.editingControl = true;
+  }
+  private endControlInteraction(): void {
+    if (this.editingControl && this.state && this.controlInteractionStart && JSON.stringify(this.controlInteractionStart) !== JSON.stringify(this.state)) this.pushHistory(this.controlInteractionStart);
+    this.editingControl = false;
+    this.controlInteractionStart = undefined;
+  }
   private undo(): void { if (!this.state || !this.history.length) return; this.future.push(structuredClone(this.state)); this.state = this.history.pop()!; this.render(); this.update(); }
   private redo(): void { if (!this.state || !this.future.length) return; this.history.push(structuredClone(this.state)); this.state = this.future.pop()!; this.render(); this.update(); }
   private resumeVideo(entry: { video: HTMLVideoElement; currentTime: number }): void {
