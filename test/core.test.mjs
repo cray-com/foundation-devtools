@@ -1,10 +1,40 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { defineDevtoolsConfig, initialState, validateState, encodeState, decodeState, stateUrl, recipe, changes, changesJson, agentBrief, resetBaseline } from '../dist/core.js';
+import { defineDevtoolsConfig, initialState, validateState, encodeState, decodeState, stateUrl, recipe, changes, changesJson, agentBrief, resetBaseline, recipeRegistry, safeRoute, handoff } from '../dist/core.js';
 const config=defineDevtoolsConfig({project:'fixture',metadata:{route:'/x'},families:[{key:'card',label:'Card',variants:[{name:'a'},{name:'b'}]}],controls:[{type:'range',key:'gap',label:'Gap',min:0,max:20,default:4,effect:{scope:'grid',variable:'--fd-gap'}},{type:'toggle',key:'featured',label:'Featured',default:false,effect:{scope:'card',attribute:'featured'}}]});
 test('defaults and fail-closed state',()=>{const s=initialState(config);assert.equal(s.values.gap,4);assert.equal(validateState(config,{values:{gap:999,featured:'yes'},families:{card:'unknown'}}).values.gap,4);});
 test('URL codec is reproducible and preserves params',()=>{const s={families:{card:'b'},values:{gap:8,featured:true}};const encoded=encodeState(config,s);assert.deepEqual(decodeState(config,encoded),s);const u=stateUrl(config,s,'https://example.test/?utm=x');assert.equal(new URL(u).searchParams.get('utm'),'x');assert.ok(u.includes('fd='));});
 test('recipe is JSON',()=>{assert.equal(JSON.parse(recipe(config,initialState(config))).project,'fixture');});
+test('safe routes exclude query, fragment, and credentials from every handoff output', () => {
+  assert.equal(safeRoute('https://user:secret@example.test/design?fd=secret#changes'), '/design');
+  assert.equal(safeRoute('/design#inspect?x=y'), '/design');
+  const routeConfig = defineDevtoolsConfig({ project: 'routes', metadata: { route: 'https://user:secret@example.test/design?token=private#changes', locale: 'en' }, families: [{ key: 'card', label: 'Card', variants: [{ name: 'a' }, { name: 'b' }] }] });
+  const changed = validateState(routeConfig, { families: { card: 'b' } });
+  for (const output of [changes(routeConfig, changed), JSON.parse(changesJson(routeConfig, changed)), agentBrief(routeConfig, changed)]) {
+    const text = typeof output === 'string' ? output : JSON.stringify(output);
+    assert.equal(text.includes('secret'), false);
+    assert.equal(text.includes('token='), false);
+    if (typeof output !== 'string') assert.equal(output.metadata?.route, '/design');
+  }
+  assert.equal(routeConfig.metadata?.route, 'https://user:secret@example.test/design?token=private#changes');
+  assert.deepEqual(changed, { families: { card: 'b' }, values: {} });
+});
+test('handoff sanitizes hostile external annotations without mutation', () => {
+  const hostile = { route: 'https://user:pw@example.test/private?token=secret#hash', locale: 'en' + String.fromCharCode(0, 10) + 'L'.repeat(500), selector: 'main > '.repeat(200), rect: { x: Infinity, y: -Infinity, width: 999999999, height: -4 }, comment: '<script>' + String.fromCharCode(0) + 'x'.repeat(2000), extra: 'must disappear' };
+  const annotations = Array.from({ length: 20 }, () => hostile);
+  const before = JSON.stringify(hostile);
+  const output = handoff(config, initialState(config), hostile, annotations, 'intent' + String.fromCharCode(0) + 'i'.repeat(2000));
+  assert.equal(JSON.stringify(hostile), before);
+  assert.ok(output.length <= 16_000);
+  assert.equal(output.includes('pw@'), false);
+  assert.equal(output.includes('token='), false);
+  assert.equal(output.includes('must disappear'), false);
+  assert.equal((output.match(/"selector"/g) ?? []).length <= 9, true);
+  assert.equal(output.includes(String.fromCharCode(0)), false);
+  assert.match(output, /"width":100000/);
+  assert.match(output, /"height":0/);
+});
+
 test('targets, labeled options and fail-closed object validation', () => {
   const targetConfig = defineDevtoolsConfig({ project: 'targets', targets: [{ key: 'hero', label: 'Hero', kind: 'section' }], families: [{ key: 'layout', label: 'Layout', target: 'hero', variants: [{ name: 'base', defaults: { density: 'compact' } }, { name: 'wide' }] }], controls: [{ type: 'select', key: 'density', label: 'Density', options: [{ value: 'compact', label: 'Compact' }, 'roomy'], default: 'roomy', target: 'hero', classification: 'token', effect: { scope: 'hero', attribute: 'density' } }] });
   assert.equal(initialState(targetConfig).values.density, 'compact');
@@ -25,6 +55,14 @@ test('targets, labeled options and fail-closed object validation', () => {
   assert.throws(() => defineDevtoolsConfig({ project: 'x', targets: [{ key: 'hero', label: 'Hero', kind: 'section' }], families: [{ key: 'f', label: 'F', target: 'missing', variants: [{ name: 'a' }] }] }), /family target/);
   assert.throws(() => defineDevtoolsConfig({ project: 'x', families: [{ key: 'f', label: 'F', variants: [{ name: 'a' }] }], controls: [{ type: 'toggle', key: 't', label: 'T', target: 'missing', default: false, effect: { scope: 'f', attribute: 't' } }] }), /control target/);
   assert.equal(defineDevtoolsConfig({ project: 'legacy', families: [{ key: 'f', label: 'F', variants: [{ name: 'a' }] }] }).targets, undefined);
+});
+
+test('Compose uses only explicit, existing registrations', () => {
+  const config = defineDevtoolsConfig({ project: 'compose', families: [{ key: 'layout', label: 'Layout', variants: [{ name: 'base' }] }, { key: 'hidden-family', label: 'Hidden', variants: [{ name: 'base' }] }], controls: [{ type: 'toggle', key: 'visible', label: 'Visible', default: false, effect: { scope: 'x', attribute: 'visible' } }, { type: 'toggle', key: 'hidden-control', label: 'Hidden', default: false, effect: { scope: 'x', attribute: 'hidden' } }], recipes: [{ key: 'known', label: 'Known', state: {} }], compose: { recipes: ['known'], families: ['layout'], controls: ['visible'] } });
+  assert.deepEqual(recipeRegistry(config).map((item) => item.key), ['known']);
+  assert.deepEqual(config.compose, { recipes: ['known'], families: ['layout'], controls: ['visible'] });
+  assert.throws(() => defineDevtoolsConfig({ project: 'compose', families: [{ key: 'layout', label: 'Layout', variants: [{ name: 'base' }] }], compose: { families: ['missing'] } }), /compose family/);
+  assert.throws(() => defineDevtoolsConfig({ project: 'compose', families: [{ key: 'layout', label: 'Layout', variants: [{ name: 'base' }] }], compose: { recipes: ['missing'] } }), /compose recipe/);
 });
 
 test('invalid config rejects', () => {

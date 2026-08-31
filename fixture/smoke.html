@@ -4,14 +4,16 @@
 <style>
   .grid { display: grid; gap: var(--fd-gap, 1rem); }
   [data-fd-scope="card"] { color: rebeccapurple; }
+  @keyframes smoke-spin { from { opacity: .2; } to { opacity: .8; } }
+  .motion-test { animation: smoke-spin 10s linear infinite; transition: opacity 10s linear; }
 </style>
 <main class="grid" data-fd-target="hero" data-fd-scope="grid"><article data-fd-scope="card">Card</article><article data-fd-scope="card">Card</article></main>
 <aside data-fd-target="hero" data-fd-scope="grid">Second registered hero target</aside>
-<section data-fd-target="notes">Notes</section>
+<section data-fd-target="notes">Notes</section><div id="shadow-host"></div>
 <script type="module">
   window.addEventListener('error', (event) => { document.title = `FD error ${event.message}`; });
   import { defineDevtoolsElement } from '../dist/element.js';
-  import { applyEffects, initialState } from '../dist/core.js';
+  import { applyEffects, initialState, domPath, resolvePath } from '../dist/core.js';
 
   localStorage.clear();
   const config = {
@@ -20,6 +22,8 @@
     families: [{ key: 'card', label: 'Card', target: 'hero', effect: { scope: 'card', attribute: 'card-variant' }, variants: [
       { name: 'one' }, { name: 'two', defaults: { gap: 3 } },
     ] }],
+    compose: { recipes: ['wide-layout'], families: ['card'], controls: ['gap', 'density', 'featured'] },
+    recipes: [{ key: 'wide-layout', label: 'Wide layout', state: { families: { card: 'two' }, values: { gap: 3 } } }],
     controls: [
       { type: 'range', key: 'gap', label: 'Gap', min: 1, max: 4, default: 2, target: 'hero',
         unit: 'rem', effect: { scope: 'grid', variable: '--fd-gap' } },
@@ -29,14 +33,38 @@
         effect: { scope: 'card', attribute: 'featured' } },
     ],
   };
+  const shadowHost = document.querySelector('#shadow-host');
+  const shadow = shadowHost.attachShadow({ mode: 'open' });
+  shadow.innerHTML = '<style>@keyframes shadow-spin { from { opacity: .1; } to { opacity: .9; } } .motion-test { animation: shadow-spin 10s linear infinite; transition: opacity 10s linear; }</style><section data-fd-target="shadow" data-fd-scope="grid"><button>Shadow target</button></section>';
+  const motion = document.createElement('div'); motion.className = 'motion-test'; document.body.append(motion);
+  const shadowMotion = shadow.querySelector('section'); shadowMotion.classList.add('motion-test');
+  const firstCard = document.querySelectorAll('[data-fd-scope="card"]')[0]; const secondCard = document.querySelectorAll('[data-fd-scope="card"]')[1];
+  firstCard.id = 'safe-card'; secondCard.id = 'bad id';
+  const duplicate = document.createElement('article'); duplicate.id = 'safe-card'; duplicate.setAttribute('data-fd-scope', 'card'); document.querySelector('main').append(duplicate);
+  const pathChecks = domPath(firstCard).includes(':nth-of-type(1)') && !domPath(secondCard).includes('#bad') && domPath(secondCard).includes(':nth-of-type(2)') &&
+    resolvePath(domPath(firstCard)) === firstCard && resolvePath(domPath(secondCard)) === secondCard && domPath(shadow.querySelector('button')).includes(' >>> ') && resolvePath(domPath(shadow.querySelector('button'))) === shadow.querySelector('button');
+  duplicate.remove(); firstCard.id = ''; secondCard.id = '';
+  config.targets.push({ key: 'shadow', label: 'Shadow', kind: 'section' });
   const element = defineDevtoolsElement(config);
   document.body.append(element);
   await new Promise((resolve) => queueMicrotask(resolve));
   const root = element.shadowRoot;
+  const restorePhase = sessionStorage.getItem('foundation-devtools:fixture:restore-test');
+  let restoredSelectionPass = restorePhase === 'normal' || restorePhase === 'shadow';
+  if (restorePhase) {
+    root.querySelector('[data-action="tab-inspect"]').click();
+    const inspectText = root.querySelector('.body').textContent;
+    restoredSelectionPass = restorePhase === 'shadow'
+      ? inspectText.includes('Selected: button') && inspectText.includes(' >>> ')
+      : inspectText.includes('Selected: main') && !inspectText.includes(' >>> ');
+    root.querySelector('[data-action="tab-compose"]').click();
+  }
   const [variant, density] = root.querySelectorAll('select');
   const range = root.querySelector('input[type="range"]');
   const toggle = root.querySelector('input[type="checkbox"]');
-  const initiallyCollapsed = root.querySelector('.panel').classList.contains('collapsed');
+  const initiallyOpen = !root.querySelector('.panel').classList.contains('collapsed');
+  root.querySelector('[data-action="collapse"]').click();
+  const collapsed = root.querySelector('.panel').classList.contains('collapsed');
   root.querySelector('[data-action="collapse"]').click();
   const opened = !root.querySelector('.panel').classList.contains('collapsed');
   variant.value = 'two';
@@ -51,6 +79,16 @@
   const grid = document.querySelector('[data-fd-scope="grid"]');
   const map = root.querySelector('.map');
   const mapCounts = map && map.textContent.includes('All 4 · Δ4') && map.textContent.includes('Global 2 · Δ2') && map.textContent.includes('Hero 2 · Δ2') && map.textContent.includes('Notes 0 · Δ0');
+  root.querySelector('[data-action="tab-inspect"]').click();
+  const inspectMapWithoutSelection = Boolean(root.querySelector('[aria-label="Page map"]')) && (restorePhase ? Boolean(root.querySelector('[data-action="copy-selector"]')) : !root.querySelector('[data-action="copy-selector"]'));
+  root.querySelector('[data-action="tab-compose"]').click();
+  root.querySelector('[data-action="tab-compose"]')?.focus();
+  const firefoxShortcut = new KeyboardEvent('keydown', { key: '1', ctrlKey: true, bubbles: true, cancelable: true });
+  document.dispatchEvent(firefoxShortcut);
+  const browserShortcutIgnored = !root.querySelector('.body h2') && !firefoxShortcut.defaultPrevented;
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: '1', bubbles: true }));
+  const shortcutTabPersisted = localStorage.getItem('foundation-devtools:fixture:panel:tab') === 'inspect';
+  root.querySelector('[data-action="tab-compose"]').click();
   const isolatedRoot = document.querySelectorAll('[data-fd-target="hero"]')[1];
   isolatedRoot.style.removeProperty('--fd-gap');
   const isolatedState = initialState(config); isolatedState.values.gap = 3;
@@ -63,11 +101,15 @@
     new URL(location.href).searchParams.has('fd');
   root.querySelector('[data-action="hide"]').click();
   const hidden = root.querySelector('.panel').classList.contains('hidden');
+  const hideNotPersisted = localStorage.getItem('foundation-devtools:fixture:panel') === 'open';
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', ctrlKey: true, shiftKey: true }));
   const restoredCollapsed = !root.querySelector('.panel').classList.contains('hidden') &&
     root.querySelector('.panel').classList.contains('collapsed');
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', ctrlKey: true, shiftKey: true }));
   const shortcutOpened = !root.querySelector('.panel').classList.contains('collapsed');
+  const shadowMap = root.querySelector('[data-map-target="shadow"]');
+  shadowMap.click();
+  const shadowRevealed = shadow.querySelector('[data-fd-target="shadow"]').style.outline !== '';
   root.querySelector('[data-action="changes"]').click();
   await new Promise((resolve) => setTimeout(resolve, 50));
   const copiedChanges = ['Copied', 'Copy unavailable'].includes(root.querySelector('.status').textContent);
@@ -86,16 +128,32 @@
   root.querySelector('[data-action="reset-control"][data-control="gap"]').click();
   const controlReset = grid.style.getPropertyValue('--fd-gap') === '2rem';
   range.value = '4'; range.dispatchEvent(new Event('input', { bubbles: true }));
+  range.dispatchEvent(new Event('change', { bubbles: true }));
 
   root.querySelector('[data-action="pick"]').click();
   const hero = document.querySelector('[data-fd-target="hero"]');
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', bubbles: true }));
   hero.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }));
-  const marked = hero.style.outline !== '';
+  const pickerSuspended = hero.style.outline === '';
+  document.dispatchEvent(new KeyboardEvent('keyup', { key: ' ', bubbles: true }));
+  hero.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }));
+  const pickerResumed = hero.style.outline !== '' && Boolean(document.querySelector('[data-fd-picker-label]')) && getComputedStyle(document.querySelector('[data-fd-picker-label]')).pointerEvents === 'none';
+  hero.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }));
+  const marked = hero.style.outline !== '' && Boolean(document.querySelector('[data-fd-picker-label]'));
   document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
   const cleaned = hero.style.outline === '' && !hero.hasAttribute('tabindex');
   root.querySelector('[data-action="pick"]').click();
   hero.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
   const picked = root.querySelector('[data-map-target="hero"]').getAttribute('aria-pressed') === 'true' && hero.style.outline === '' && !hero.hasAttribute('tabindex');
+  root.querySelector('[data-action="tab-inspect"]').click();
+  const inspectCopyActions = Boolean(root.querySelector('[data-action="copy-selector"]')) && Boolean(root.querySelector('[data-action="copy-dom-path"]')) && Boolean(root.querySelector('[data-action="copy-context"]'));
+  root.querySelector('[data-action="copy-context"]').click();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const inspectCopied = ['Copied', 'Copy unavailable'].includes(root.querySelector('.status').textContent);
+  root.querySelector('[data-action="tab-inspect"]')?.focus();
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: '2', shiftKey: true, bubbles: true }));
+  const shiftTwoFocused = document.activeElement === hero;
+  root.querySelector('[data-action="tab-compose"]').click();
   root.querySelector('[data-action="reset-target"]').click();
   const targetReset = grid.style.getPropertyValue('--fd-gap') === '2rem' && card.getAttribute('data-card-variant') === 'one';
   root.querySelector('[data-action="reset"]').click();
@@ -105,6 +163,57 @@
   range.focus();
   await new Promise((resolve) => setTimeout(resolve, 50));
   const feedback = ['Copied', 'Copy unavailable'].includes(root.querySelector('.status').textContent);
-  document.title = passed && initiallyCollapsed && opened && hidden && restoredCollapsed && shortcutOpened && feedback && copiedChanges && copiedBrief && originalApplied && modifiedRestored && emptyTarget && controlReset && marked && cleaned && picked && targetReset && fullReset
-    ? 'FD browser PASS' : 'FD browser FAIL';
+
+  // One continuous range gesture is one history entry, and a single viewport edge is a valid snap.
+  const historyRange = root.querySelector('input[type="range"]');
+  historyRange.value = '4'; historyRange.dispatchEvent(new Event('input', { bubbles: true }));
+  historyRange.dispatchEvent(new Event('change', { bubbles: true }));
+  historyRange.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+  historyRange.value = '1'; historyRange.dispatchEvent(new Event('input', { bubbles: true }));
+  historyRange.value = '3'; historyRange.dispatchEvent(new Event('input', { bubbles: true }));
+  historyRange.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+  root.querySelector('[data-action="undo"]').click();
+  const groupedHistory = root.querySelector('input[type="range"]').value === '4';
+  root.querySelector('[data-action="redo"]').click();
+  const redoneHistory = root.querySelector('input[type="range"]').value === '3';
+  const panel = root.querySelector('.panel');
+  const panelRect = panel.getBoundingClientRect();
+  panel.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: panelRect.left + 20, clientY: panelRect.top + 20, pointerId: 7 }));
+  panel.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 1, clientY: panelRect.top + 80, pointerId: 7 }));
+  panel.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: 1, clientY: panelRect.top + 80, pointerId: 7 }));
+  const edgeSnap = panel.style.left === '0px' && panel.getBoundingClientRect().top >= 0;
+
+  const running = document.createElement('video'); const paused = document.createElement('video');
+  document.body.append(running, paused); const runningBefore = { currentTime: running.currentTime, paused: running.paused }; const pausedBefore = { currentTime: paused.currentTime, paused: paused.paused };
+  root.querySelector('[data-action="freeze"]').click();
+  const documentFreeze = getComputedStyle(motion).animationPlayState === 'paused' && getComputedStyle(motion).transitionProperty === 'none';
+  const shadowFreeze = getComputedStyle(shadowMotion).animationPlayState === 'paused' && getComputedStyle(shadowMotion).transitionProperty === 'none' && Boolean(shadow.querySelector('style[data-fd-freeze]')) && Boolean(document.querySelector('style[data-fd-freeze]'));
+  const frozenVideoState = running.paused === runningBefore.paused && running.currentTime === runningBefore.currentTime && paused.paused === pausedBefore.paused && paused.currentTime === pausedBefore.currentTime;
+  root.querySelector('[data-action="freeze"]').click();
+  const restoredMotion = getComputedStyle(motion).animationPlayState !== 'paused' && getComputedStyle(motion).transitionProperty !== 'none' && !shadow.querySelector('style[data-fd-freeze]') && !document.querySelector('style[data-fd-freeze]');
+  const videoState = frozenVideoState && running.paused === runningBefore.paused && running.currentTime === runningBefore.currentTime && paused.paused === pausedBefore.paused && paused.currentTime === pausedBefore.currentTime;
+  running.remove(); paused.remove();
+  panel.style.left = '9999px'; panel.style.top = '9999px'; window.dispatchEvent(new Event('resize'));
+  const resizeClamped = panel.getBoundingClientRect().right <= innerWidth && panel.getBoundingClientRect().bottom <= innerHeight;
+  const pickForReload = (target) => {
+    root.querySelector('[data-action="pick"]').click();
+    target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  };
+  if (restorePhase === null) {
+    pickForReload(shadow.querySelector('button'));
+    sessionStorage.setItem('foundation-devtools:fixture:restore-test', 'shadow');
+    location.reload();
+    await new Promise(() => {});
+  } else if (restorePhase === 'shadow') {
+    pickForReload(hero);
+    sessionStorage.setItem('foundation-devtools:fixture:restore-test', 'normal');
+    location.reload();
+    await new Promise(() => {});
+  } else {
+    sessionStorage.removeItem('foundation-devtools:fixture:restore-test');
+    document.title = passed && initiallyOpen && collapsed && opened && hidden && hideNotPersisted && restoredCollapsed && shortcutOpened && shadowRevealed && feedback && copiedChanges && copiedBrief && originalApplied && modifiedRestored && emptyTarget && controlReset && marked && pickerSuspended && pickerResumed && cleaned && picked && shiftTwoFocused && targetReset && fullReset
+      && groupedHistory && redoneHistory && videoState && documentFreeze && shadowFreeze && restoredMotion && pathChecks && edgeSnap && resizeClamped
+      && inspectMapWithoutSelection && browserShortcutIgnored && shortcutTabPersisted && inspectCopyActions && inspectCopied && restoredSelectionPass
+      ? 'FD browser PASS' : 'FD browser FAIL';
+  }
 </script>

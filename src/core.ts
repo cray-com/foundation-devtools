@@ -70,11 +70,21 @@ export type Family = {
   effect?: Effect;
   target?: string;
 };
+export type Recipe = { key: string; label: string; state: Partial<DevtoolsState>; description?: string };
+export type ComposeRegistration = {
+  recipes?: readonly string[];
+  families?: readonly string[];
+  controls?: readonly string[];
+};
 export type DevtoolsConfig = {
   project: string;
   families: readonly Family[];
   controls?: readonly Control[];
   targets?: readonly Target[];
+  registrations?: readonly DomRegistration[];
+  recipes?: readonly Recipe[];
+  /** Explicit allow-list for the Compose view; omitted means nothing is composed. */
+  compose?: ComposeRegistration;
   metadata?: Metadata;
   queryKey?: string;
 };
@@ -95,6 +105,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function fail(message: string): never {
   throw new Error(`Invalid devtools config: ${message}`);
+}
+
+function validateCompose(value: unknown): asserts value is ComposeRegistration {
+  if (!isRecord(value) || Object.keys(value).some((key) => !['recipes', 'families', 'controls'].includes(key))) fail('compose');
+  for (const key of ['recipes', 'families', 'controls'] as const) {
+    const values = value[key];
+    if (values !== undefined && (!Array.isArray(values) || values.some((item) => typeof item !== 'string' || !keyPattern.test(item)))) fail('compose');
+  }
 }
 
 function validateEffect(effect: unknown): asserts effect is Effect {
@@ -119,6 +137,9 @@ export function validateConfig(input: unknown): DevtoolsConfig {
     fail('query key');
   }
   if (input.targets !== undefined && !Array.isArray(input.targets)) fail('targets');
+  if (input.registrations !== undefined && (!Array.isArray(input.registrations) || input.registrations.some((item) => !isRecord(item) || typeof item.key !== 'string' || !keyPattern.test(item.key) || (item.label !== undefined && typeof item.label !== 'string') || (item.scope !== undefined && (typeof item.scope !== 'string' || !scopePattern.test(item.scope))) || (item.target !== undefined && typeof item.target !== 'string')))) fail('registrations');
+  if (input.recipes !== undefined && (!Array.isArray(input.recipes) || input.recipes.some((item) => !isRecord(item) || typeof item.key !== 'string' || !keyPattern.test(item.key) || typeof item.label !== 'string' || !isRecord(item.state)))) fail('recipes');
+  if (input.compose !== undefined) validateCompose(input.compose);
   const targets: Target[] = [];
   const targetKeys = new Set<string>();
   for (const targetValue of (Array.isArray(input.targets) ? input.targets : [])) {
@@ -135,6 +156,12 @@ export function validateConfig(input: unknown): DevtoolsConfig {
 
   const names = new Set<string>();
   const families: Family[] = [];
+  const registrationKeys = new Set<string>();
+  for (const registration of (Array.isArray(input.registrations) ? input.registrations : [])) {
+    if (registrationKeys.has(registration.key as string) || (registration.target !== undefined && !targetKeys.has(registration.target as string))) fail('registration');
+    registrationKeys.add(registration.key as string);
+  }
+
   for (const familyValue of input.families) {
     if (!isRecord(familyValue) || typeof familyValue.key !== 'string' ||
         !keyPattern.test(familyValue.key) || names.has(familyValue.key) ||
@@ -208,6 +235,14 @@ export function validateConfig(input: unknown): DevtoolsConfig {
   }
 
   const config = { ...input, families, controls } as unknown as DevtoolsConfig;
+  if (config.compose) {
+    const recipeKeys = new Set((config.recipes ?? []).map((item) => item.key));
+    const familyKeys = new Set(config.families.map((item) => item.key));
+    const controlKeys = new Set((config.controls ?? []).map((item) => item.key));
+    for (const key of config.compose.recipes ?? []) if (!recipeKeys.has(key)) fail('compose recipe');
+    for (const key of config.compose.families ?? []) if (!familyKeys.has(key)) fail('compose family');
+    for (const key of config.compose.controls ?? []) if (!controlKeys.has(key)) fail('compose control');
+  }
   for (const family of config.families) {
     for (const variant of family.variants) {
       for (const controlKey of Object.keys(variant.defaults ?? {})) {
@@ -290,6 +325,11 @@ export function stateUrl(config: DevtoolsConfig, state: DevtoolsState, url?: str
   const result = new URL(url ?? (typeof location === 'undefined' ? 'http://localhost/' : location.href));
   result.searchParams.set(config.queryKey ?? 'fd', encodeState(config, state));
   return result.toString();
+}
+
+function redactedMetadata(metadata?: Metadata): Metadata | undefined {
+  if (!metadata) return undefined;
+  return { ...metadata, ...(metadata.route !== undefined ? { route: safeRoute(metadata.route) } : {}) };
 }
 
 function kebab(value: string): string {
@@ -375,7 +415,8 @@ export function changes(config: DevtoolsConfig, state: DevtoolsState, baseline: 
     if (from !== to) { const target = control.target ? targetMap.get(control.target) : undefined;
       result.push({ key: control.key, label: control.label, kind: 'control', from, to, ...(control.target ? { target: control.target, targetKind: target?.kind } : {}), ...(control.classification ? { classification: control.classification } : {}) }); }
   }
-  return { project: config.project, ...(config.metadata ? { metadata: config.metadata } : {}), changes: result, count: result.length };
+  const metadata = redactedMetadata(config.metadata);
+  return { project: config.project, ...(metadata ? { metadata } : {}), changes: result, count: result.length };
 }
 
 export function changesJson(config: DevtoolsConfig, state: DevtoolsState, baseline?: DevtoolsState): string {
@@ -384,9 +425,10 @@ export function changesJson(config: DevtoolsConfig, state: DevtoolsState, baseli
 
 export function agentBrief(config: DevtoolsConfig, state: DevtoolsState, baseline?: DevtoolsState): string {
   const diff = changes(config, state, baseline);
-  if (!diff.count) return `# ${config.project} changes\n\nNo changes.`;
+  const metadata = diff.metadata ? `\n\n## Metadata\n\n\`${JSON.stringify(diff.metadata)}\`` : '';
+  if (!diff.count) return `# ${config.project} changes${metadata}\n\nNo changes.`;
   const lines = diff.changes.map((item) => `- **${item.label}** (${item.kind}${item.target ? `, target: ${item.target}` : ''}${item.classification ? `, ${item.classification}` : ''}): \`${String(item.from)}\` → \`${String(item.to)}\``);
-  return `# ${config.project} changes\n\n${lines.join('\n')}`;
+  return `# ${config.project} changes${metadata}\n\n${lines.join('\n')}`;
 }
 
 /** Return a fresh state baseline; useful for scoped reset controls. */
@@ -414,6 +456,156 @@ export function recipe(config: DevtoolsConfig, state: DevtoolsState): string {
 
 export function typescriptRecipe(config: DevtoolsConfig, state: DevtoolsState): string {
   return `import { defineDevtoolsConfig, validateState } from '@cray-com/foundation-devtools';\n\nconst config = defineDevtoolsConfig(${JSON.stringify(config, null, 2)});\nconst state = validateState(config, ${JSON.stringify(validateState(config, state), null, 2)});\n\nexport { config, state };\n`;
+}
+
+/** A safe, explicit DOM registration. Registrations never infer controls from classes. */
+export type DomRegistration = {
+  key: string;
+  label?: string;
+  scope?: string;
+  target?: string;
+};
+export type LayoutFacts = {
+  rect: { x: number; y: number; width: number; height: number };
+  display: string;
+  gridColumns: string;
+  gap: string;
+  position: string;
+  overflow: string;
+  container?: string;
+  path: string;
+};
+export type Annotation = {
+  route: string;
+  locale?: string;
+  target?: string;
+  component?: string;
+  scope?: string;
+  selector: string;
+  rect: LayoutFacts['rect'];
+  comment?: string;
+};
+
+/** Return only the route path; query strings, fragments, and credentials never enter exports. */
+export function safeRoute(value: string): string {
+  if (typeof value !== 'string') return '/';
+  try { const url = new URL(value, 'http://localhost'); return url.pathname || '/'; } catch { return '/'; }
+}
+function cssIdent(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, (char) => `\\${char.charCodeAt(0).toString(16)} `);
+}
+const safeDomId = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/;
+function rootOf(element: Element): Document | ShadowRoot { return element.getRootNode() as Document | ShadowRoot; }
+function uniqueId(element: Element, id: string): boolean {
+  if (!safeDomId.test(id)) return false;
+  try { return rootOf(element).querySelectorAll(`#${cssIdent(id)}`).length === 1; } catch { return false; }
+}
+function elementSegment(element: Element, root: Document | ShadowRoot): string {
+  const tag = element.tagName.toLowerCase(); const id = element.getAttribute('id');
+  if (id && uniqueId(element, id)) return `${tag}#${cssIdent(id)}`;
+  const parent: Element | null = element.parentElement;
+  const siblings = parent
+    ? Array.from(parent.children).filter((child) => child.tagName === element.tagName)
+    : Array.from(root.children).filter((child) => child.tagName === element.tagName);
+  return `${tag}:nth-of-type(${Math.max(1, siblings.indexOf(element) + 1)})`;
+}
+/** Element-exact, bounded path. ` >>> ` is an explicit open ShadowRoot boundary. */
+export function domPath(element: Element, limit = 32): string {
+  const parts: string[] = []; let current: Element | null = element; let root = rootOf(element);
+  while (current && parts.length < Math.max(1, limit) && current.nodeType === 1) {
+    parts.unshift(elementSegment(current, root));
+    const parent: Element | null = current.parentElement;
+    if (parent) current = parent;
+    else {
+      const shadow = root as ShadowRoot;
+      const host = shadow.host;
+      if (host) { parts.unshift('>>>'); current = host; root = rootOf(host); }
+      else current = null;
+    }
+  }
+  return parts.join(' > ').replace(/ > >>> > /g, ' >>> ').slice(0, 512);
+}
+/** Resolve a domPath, including its explicit open-shadow boundaries. */
+export function resolvePath(path: string, root: Document | ShadowRoot = document): Element | undefined {
+  if (typeof path !== 'string' || path.length === 0 || path.length > 512) return undefined;
+  let currentRoot: Document | ShadowRoot = root; let value = path;
+  try {
+    const chunks = value.split(' >>> ');
+    for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
+      const segments = chunks[chunkIndex].split(' > ');
+      let current: Element | null = null;
+      for (const segment of segments) {
+        if (!segment || segment === '>>>') return undefined;
+        current = current ? current.querySelector(segment) : currentRoot.querySelector(segment);
+        if (!current) return undefined;
+      }
+      if (chunkIndex < chunks.length - 1) {
+        if (!current?.shadowRoot) return undefined;
+        currentRoot = current.shadowRoot;
+      } else return current ?? undefined;
+    }
+  } catch { return undefined; }
+  return undefined;
+}
+function dataAncestor(element: Element, name: string): string | undefined {
+  let current: Element | null = element;
+  while (current) { const value = current.getAttribute(name); if (value) return value; current = current.parentElement ?? ((current.getRootNode() as ShadowRoot).host ?? null); }
+  return undefined;
+}
+export function layoutFacts(element: Element): LayoutFacts {
+  const rect = element.getBoundingClientRect();
+  const style = getComputedStyle(element);
+  const parent = element.parentElement;
+  return { rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) }, display: style.display, gridColumns: style.gridTemplateColumns, gap: style.gap, position: style.position, overflow: style.overflow, ...(parent ? { container: parent.tagName.toLowerCase() } : {}), path: domPath(element) };
+}
+export function annotationFor(element: Element, config?: DevtoolsConfig, comment?: string): Annotation {
+  const scopeValue = dataAncestor(element, 'data-fd-scope');
+  const targetValue = dataAncestor(element, 'data-fd-target');
+  const registration = config?.registrations?.find((item) => (item.scope ?? item.key) === scopeValue);
+  const target = config?.targets?.some((item) => item.key === targetValue) ? targetValue : undefined;
+  const registrationTarget = registration?.target;
+  const scope = registration ? (registration.scope ?? scopeValue) : undefined;
+  const rect = element.getBoundingClientRect();
+  return { route: safeRoute(typeof location === 'undefined' ? '/' : location.href), ...(config?.metadata?.locale ? { locale: config.metadata.locale } : {}), ...(target || registrationTarget ? { target: target ?? registrationTarget } : {}), ...(registration ? { component: registration.label ?? registration.key } : {}), ...(scope ? { scope } : {}), selector: domPath(element), rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) }, ...(comment ? { comment: comment.slice(0, 500) } : {}) };
+}
+export function recipeRegistry(config: DevtoolsConfig): readonly Recipe[] { return (config.recipes ?? []).map((item) => ({ ...item, state: validateState(config, item.state) })); }
+
+const ANNOTATION_LIMITS = { route: 256, locale: 64, target: 96, component: 128, scope: 96, selector: 512, comment: 500 } as const;
+const HANDOFF_MAX = 16_000;
+function cleanString(value: unknown, limit: number): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  return value.replace(/[\u0000-\u001f\u007f-\u009f]/g, '').slice(0, limit);
+}
+function finiteBox(value: unknown): Annotation['rect'] {
+  const input = value && typeof value === 'object' ? value as Record<string, unknown> : {};
+  const number = (key: string, minimum: number, maximum: number) => {
+    const item = input[key];
+    return typeof item === 'number' && Number.isFinite(item) ? Math.min(maximum, Math.max(minimum, item)) : 0;
+  };
+  return { x: number('x', -100_000, 100_000), y: number('y', -100_000, 100_000), width: number('width', 0, 100_000), height: number('height', 0, 100_000) };
+}
+/** Copy only the annotation schema. This deliberately drops every unknown field and never mutates input. */
+function safeAnnotation(value: unknown): Annotation | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const input = value as Record<string, unknown>;
+  const route = cleanString(input.route, ANNOTATION_LIMITS.route);
+  const selector = cleanString(input.selector, ANNOTATION_LIMITS.selector);
+  if (!route || !selector) return undefined;
+  const result: Annotation = { route: safeRoute(route), selector, rect: finiteBox(input.rect) };
+  for (const key of ['locale', 'target', 'component', 'scope', 'comment'] as const) {
+    const item = cleanString(input[key], ANNOTATION_LIMITS[key]);
+    if (item) result[key] = item;
+  }
+  return result;
+}
+export function handoff(config: DevtoolsConfig, state: DevtoolsState, selected?: Annotation, annotations: readonly Annotation[] = [], intent?: string): string {
+  const diff = changes(config, state);
+  const safeSelected = safeAnnotation(selected);
+  const safeAnnotations = Array.isArray(annotations) ? annotations.map(safeAnnotation).filter((item): item is Annotation => Boolean(item)).slice(0, 8) : [];
+  const safeIntent = cleanString(intent, 500);
+  const payload = { ...(safeSelected ? { selected: safeSelected } : {}), annotations: safeAnnotations, ...(safeIntent ? { intent: safeIntent } : {}), changes: diff };
+  const output = agentBrief(config, state) + '\n\n## Selection context\n\n```json\n' + JSON.stringify(payload) + '\n```';
+  return output.slice(0, HANDOFF_MAX);
 }
 
 export function defineDevtoolsConfig(config: DevtoolsConfig): DevtoolsConfig {
