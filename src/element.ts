@@ -10,9 +10,11 @@ import {
   stateUrl,
   typescriptRecipe,
   validateConfig,
+  validateState,
   annotationFor,
   layoutFacts,
   handoff,
+  recipeRegistry,
   type Annotation,
   type Control,
   type DevtoolsConfig,
@@ -52,8 +54,10 @@ export class FoundationDevtoolsElement extends HTMLElement {
   private intent = '';
   private history: DevtoolsState[] = [];
   private future: DevtoolsState[] = [];
+  private editingControl = false;
   private frozen = false;
   private frozenVideos: HTMLVideoElement[] = [];
+  private freezeStyle?: HTMLStyleElement;
 
   connectedCallback(): void {
     if (!this.shadowRoot) this.attachShadow({ mode: 'open' });
@@ -66,6 +70,8 @@ export class FoundationDevtoolsElement extends HTMLElement {
     document.removeEventListener('keydown', this.recover);
     document.removeEventListener('keydown', this.toolKeys);
     this.pickerCleanup?.(); this.pickerCleanup = undefined;
+    this.freezeStyle?.remove(); this.freezeStyle = undefined;
+    for (const video of this.frozenVideos) void video.play().catch(() => {}); this.frozenVideos = [];
   }
 
   configure(config: DevtoolsConfig): void {
@@ -93,7 +99,7 @@ export class FoundationDevtoolsElement extends HTMLElement {
       </section>`;
     this.panel = root.querySelector('.panel')!;
     this.status = root.querySelector('.status')!;
-    this.panel.addEventListener('pointerdown', (event) => { if ((event.target as HTMLElement).closest('button,input,select')) return; this.panel!.setPointerCapture((event as PointerEvent).pointerId); const start = event as PointerEvent; const rect = this.panel!.getBoundingClientRect(); const move = (e: PointerEvent) => { this.panel!.style.left = `${Math.max(0, Math.min(innerWidth - rect.width, rect.left + e.clientX - start.clientX))}px`; this.panel!.style.top = `${Math.max(0, Math.min(innerHeight - rect.height, rect.top + e.clientY - start.clientY))}px`; this.panel!.style.right = 'auto'; this.panel!.style.bottom = 'auto'; }; const end = () => { this.panel!.removeEventListener('pointermove', move); this.panel!.removeEventListener('pointerup', end); const current = this.panel!.getBoundingClientRect(); const margin = 12; const left = current.left < innerWidth / 2 ? margin : Math.max(margin, innerWidth - current.width - margin); const top = current.top < innerHeight / 2 ? margin : Math.max(margin, innerHeight - current.height - margin); this.panel!.style.left = `${left}px`; this.panel!.style.top = `${top}px`; try { localStorage.setItem(`${this.storageKey}:position`, JSON.stringify({ left, top })); } catch {} }; this.panel!.addEventListener('pointermove', move); this.panel!.addEventListener('pointerup', end); });
+    this.panel.addEventListener('pointerdown', (event) => { if ((event.target as HTMLElement).closest('button,input,select')) return; this.panel!.setPointerCapture((event as PointerEvent).pointerId); const start = event as PointerEvent; const rect = this.panel!.getBoundingClientRect(); const move = (e: PointerEvent) => { this.panel!.style.left = `${Math.max(0, Math.min(innerWidth - rect.width, rect.left + e.clientX - start.clientX))}px`; this.panel!.style.top = `${Math.max(0, Math.min(innerHeight - rect.height, rect.top + e.clientY - start.clientY))}px`; this.panel!.style.right = 'auto'; this.panel!.style.bottom = 'auto'; }; const end = () => { this.panel!.removeEventListener('pointermove', move); this.panel!.removeEventListener('pointerup', end); this.panel!.removeEventListener('pointercancel', end); const current = this.panel!.getBoundingClientRect(); const margin = 12; const left = current.left < innerWidth / 2 ? margin : Math.max(margin, innerWidth - current.width - margin); const top = current.top < innerHeight / 2 ? margin : Math.max(margin, innerHeight - current.height - margin); this.panel!.style.left = `${left}px`; this.panel!.style.top = `${top}px`; try { localStorage.setItem(`${this.storageKey}:position`, JSON.stringify({ left, top })); } catch {} }; this.panel!.addEventListener('pointermove', move); this.panel!.addEventListener('pointerup', end); this.panel!.addEventListener('pointercancel', end); });
     root.addEventListener('click', (event) => { const target = event.target as HTMLElement; this.action(target.dataset.action, target.dataset.control); });
     this.ready = true;
   }
@@ -127,6 +133,8 @@ export class FoundationDevtoolsElement extends HTMLElement {
     body.replaceChildren();
     if (this.activeTab === 'inspect') { this.renderInspect(body); return; }
     if (this.activeTab === 'changes') { this.renderChanges(body); return; }
+    const recipes = recipeRegistry(this.config);
+    if (recipes.length) { const chooser = document.createElement('div'); chooser.className = 'recipes'; for (const item of recipes) { const button = document.createElement('button'); button.textContent = item.label; button.title = item.description ?? ''; button.onclick = () => { const next = validateState(this.config!, item.state); this.pushHistory(); this.state = next; this.render(); this.update(); }; chooser.append(button); } body.append(chooser); }
     const compare = document.createElement('div'); compare.className = 'compare';
     compare.innerHTML = '<button data-action="compare-original" aria-pressed="false">Original</button><button data-action="compare-modified" aria-pressed="true">Modified</button>';
     compare.querySelector<HTMLButtonElement>('[data-action="compare-original"]')!.setAttribute('aria-pressed', String(this.compareMode === 'original'));
@@ -205,11 +213,12 @@ export class FoundationDevtoolsElement extends HTMLElement {
       range.value = String(this.state!.values[control.key]);
       output.textContent = this.rangeText(control, range.value);
       range.addEventListener('input', () => {
-        this.pushHistory();
+        if (!this.editingControl) { this.pushHistory(); this.editingControl = true; }
         this.state!.values[control.key] = Number(range.value);
         output.textContent = this.rangeText(control, range.value);
         this.update();
       });
+      range.addEventListener('change', () => { this.editingControl = false; });
     } else if (control.type === 'toggle') {
       const toggle = input as HTMLInputElement;
       toggle.type = 'checkbox';
@@ -347,18 +356,17 @@ export class FoundationDevtoolsElement extends HTMLElement {
     if (!action || !this.config || !this.state) return;
     if (action === 'collapse') this.setPanelMode(this.panel?.classList.contains('collapsed') ? 'open' : 'collapsed');
     if (action === 'hide') this.setPanelMode('hidden');
-    if (action === 'reset') { this.pushHistory(); this.state = initialState(this.config); this.render(); this.update(); }
+    if (action === 'reset') { const next = initialState(this.config); if (JSON.stringify(next) !== JSON.stringify(this.state)) { this.pushHistory(); this.state = next; this.render(); this.update(); } }
     if (action === 'tab-inspect' || action === 'tab-compose' || action === 'tab-changes') { this.activeTab = action.slice(4) as typeof this.activeTab; try { localStorage.setItem(`${this.storageKey}:tab`, this.activeTab); } catch {} this.render(); }
     if (action === 'annotate' && this.selected) { if (this.annotations.length < 8) this.annotations.push(annotationFor(this.selected, this.config, this.intent)); this.render(); }
     if (action === 'freeze') this.toggleFreeze();
     if (action === 'undo') this.undo();
     if (action === 'redo') this.redo();
     if (action === 'reset-control' && controlKey) {
-      this.pushHistory();
       const control = this.config.controls?.find((item) => item.key === controlKey);
-      if (control) { this.state.values[controlKey] = initialState(this.config).values[controlKey]; this.render(); this.update(); }
+      if (control && this.state.values[controlKey] !== initialState(this.config).values[controlKey]) { this.pushHistory(); this.state.values[controlKey] = initialState(this.config).values[controlKey]; this.render(); this.update(); }
     }
-    if (action === 'reset-target' && controlKey) { this.pushHistory(); this.state = resetBaseline(this.config, this.state, controlKey); this.render(); this.update(); }
+    if (action === 'reset-target' && controlKey) { const next = resetBaseline(this.config, this.state, controlKey); if (JSON.stringify(next) !== JSON.stringify(this.state)) { this.pushHistory(); this.state = next; this.render(); this.update(); } }
     if (action === 'changes') await this.copy(changesJson(this.config, this.state));
     if (action === 'brief') await this.copy(handoff(this.config, this.state, this.selected ? annotationFor(this.selected, this.config, this.intent) : undefined, this.annotations, this.intent));
     if (action === 'pick') { this.feedback('Pick a registered section or press Escape'); this.startPicker(); }
@@ -415,9 +423,8 @@ export class FoundationDevtoolsElement extends HTMLElement {
   private redo(): void { if (!this.state || !this.future.length) return; this.history.push(structuredClone(this.state)); this.state = this.future.pop()!; this.render(); this.update(); }
   private toggleFreeze(): void {
     this.frozen = !this.frozen;
-    let style = document.getElementById('fd-freeze-motion');
-    if (this.frozen) { this.frozenVideos = Array.from(document.querySelectorAll('video')).filter((video) => !video.paused); if (!style) { style = document.createElement('style'); style.id = 'fd-freeze-motion'; style.textContent = '*,*::before,*::after{animation-play-state:paused!important;transition:none!important}'; document.head.append(style); } for (const video of document.querySelectorAll('video')) video.pause(); this.feedback('Motion frozen'); }
-    else { style?.remove(); for (const video of this.frozenVideos) void video.play().catch(() => {}); this.frozenVideos = []; this.feedback('Motion resumed'); }
+    if (this.frozen) { this.frozenVideos = Array.from(document.querySelectorAll('video')).filter((video) => !video.paused); this.freezeStyle = document.createElement('style'); this.freezeStyle.textContent = '*,*::before,*::after{animation-play-state:paused!important;transition:none!important}'; document.head.append(this.freezeStyle); for (const video of this.frozenVideos) video.pause(); this.feedback('Motion frozen'); }
+    else { this.freezeStyle?.remove(); this.freezeStyle = undefined; for (const video of this.frozenVideos) void video.play().catch(() => {}); this.frozenVideos = []; this.feedback('Motion resumed'); }
   }
   private async copy(value: string): Promise<void> {
     try {

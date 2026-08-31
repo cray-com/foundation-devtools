@@ -70,12 +70,14 @@ export type Family = {
   effect?: Effect;
   target?: string;
 };
+export type Recipe = { key: string; label: string; state: Partial<DevtoolsState>; description?: string };
 export type DevtoolsConfig = {
   project: string;
   families: readonly Family[];
   controls?: readonly Control[];
   targets?: readonly Target[];
   registrations?: readonly DomRegistration[];
+  recipes?: readonly Recipe[];
   metadata?: Metadata;
   queryKey?: string;
 };
@@ -120,7 +122,8 @@ export function validateConfig(input: unknown): DevtoolsConfig {
     fail('query key');
   }
   if (input.targets !== undefined && !Array.isArray(input.targets)) fail('targets');
-  if (input.registrations !== undefined && (!Array.isArray(input.registrations) || input.registrations.some((item) => !isRecord(item) || typeof item.key !== 'string' || !keyPattern.test(item.key) || (item.scope !== undefined && (typeof item.scope !== 'string' || !scopePattern.test(item.scope))) || (item.target !== undefined && typeof item.target !== 'string')))) fail('registrations');
+  if (input.registrations !== undefined && (!Array.isArray(input.registrations) || input.registrations.some((item) => !isRecord(item) || typeof item.key !== 'string' || !keyPattern.test(item.key) || (item.label !== undefined && typeof item.label !== 'string') || (item.scope !== undefined && (typeof item.scope !== 'string' || !scopePattern.test(item.scope))) || (item.target !== undefined && typeof item.target !== 'string')))) fail('registrations');
+  if (input.recipes !== undefined && (!Array.isArray(input.recipes) || input.recipes.some((item) => !isRecord(item) || typeof item.key !== 'string' || !keyPattern.test(item.key) || typeof item.label !== 'string' || !isRecord(item.state)))) fail('recipes');
   const targets: Target[] = [];
   const targetKeys = new Set<string>();
   for (const targetValue of (Array.isArray(input.targets) ? input.targets : [])) {
@@ -482,8 +485,11 @@ export function annotationFor(element: Element, config?: DevtoolsConfig, comment
   const registered = config?.families.find((family) => (family.effect?.scope ?? family.key) === scope);
   const registration = config?.registrations?.find((item) => (item.scope ?? item.key) === scope);
   const rect = element.getBoundingClientRect();
-  return { route: safeRoute(typeof location === 'undefined' ? '/' : location.href), ...(config?.metadata?.locale ? { locale: config.metadata.locale } : {}), ...(target ? { target } : {}), ...(registration ? { component: registration.label ?? registration.key } : registered ? { component: registered.key } : {}), ...(scope ? { scope } : {}), selector: domPath(element), rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) }, ...(comment ? { comment: comment.slice(0, 500) } : {}) };
+  const registrationTarget = registration?.target;
+  return { route: safeRoute(typeof location === 'undefined' ? '/' : location.href), ...(config?.metadata?.locale ? { locale: config.metadata.locale } : {}), ...(target || registrationTarget ? { target: target ?? registrationTarget } : {}), ...(registration ? { component: registration.label ?? registration.key } : registered ? { component: registered.key } : {}), ...(scope ? { scope } : {}), selector: domPath(element), rect: { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) }, ...(comment ? { comment: comment.slice(0, 500) } : {}) };
 }
+export function recipeRegistry(config: DevtoolsConfig): readonly Recipe[] { return (config.recipes ?? []).map((item) => ({ ...item, state: validateState(config, item.state) })); }
+
 export function handoff(config: DevtoolsConfig, state: DevtoolsState, selected?: Annotation, annotations: readonly Annotation[] = [], intent?: string): string {
   const diff = changes(config, state);
   const payload = { ...(selected ? { selected } : {}), annotations: annotations.slice(0, 8), ...(intent ? { intent: intent.slice(0, 500) } : {}), changes: diff };
