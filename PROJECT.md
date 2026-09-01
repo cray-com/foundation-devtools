@@ -36,9 +36,9 @@ serialisierbare Website-Konfiguration
 
 Der Astro-Adapter montiert ein browserseitiges Custom Element. Das Panel verwendet Shadow DOM, damit Website-CSS und Tool-CSS einander nicht beeinflussen.
 
-## V1.1
+## V1
 
-V1.1 liefert:
+V1 liefert:
 
 - Range-, Select- und Toggle-Controls; optionale Target/Page-Map-Zuordnung (`global`/`section`) und Token-/Local-Klassifikation; labeled Select-Optionen;
 - stabile Changes-/JSON-/Agent-Brief-Exporte gegenüber `initialState` (reiner Design-State, ohne Panel-UI-State);
@@ -46,10 +46,13 @@ V1.1 liefert:
 - URL-persistierten State und kopierbare Permalinks;
 - Reset, JSON-/TypeScript-Rezept, Copy und Download;
 - Fixture-, Tenant-, Locale-, Route- und Revisionsmetadaten;
-- eingeklappten, geöffneten und vollständig versteckten Zustand;
-- Wiederherstellung über `Cmd/Ctrl + Shift + D`;
+- offenen Erststart sowie eingeklappten und vollständig versteckten Zustand;
+- Inspect, Compose und Changes mit freiem DOM-Picker, Page Map, Breadcrumb und read-only Layout-Fakten;
+- explizite Component-/Scope-Registrierungen und Compose-Allowlist für vorhandene Website-Recipes;
+- bis zu acht begrenzte Annotationen, Intent und changes-only Agent-Handoff;
+- Drag mit Edge-/Corner-Snap, Freeze Motion, Undo/Redo und Wiederherstellung über `Cmd/Ctrl + Shift + D`;
 - Reduced Motion, Tastaturbedienung und dichte responsive Darstellung;
-- Unit-Tests und einen Astro-Browser-Smoke-Test;
+- Unit-Tests und Astro-Browser-Smoke-Tests in Chromium und Firefox;
 - Nachweis, dass ein Produktions-Build keine Devtools-Oberfläche enthält.
 
 Erster realer Adapter ist das Project-Listing in `astro-foundation` mit Controls für Layoutgrid und Project Card. Clifford Ray folgt als zweiter Adapter, ohne dessen visuelle Implementierung zu teilen.
@@ -63,13 +66,9 @@ Erster realer Adapter ist das Project-Listing in `astro-foundation` mit Controls
 - visuelle Website-Komponenten oder Design Tokens;
 - ein eigenes UI-Framework.
 
-## V1 DOM-Inspector und Layouting
-
-Das Tool bietet drei getrennte Ansichten (`Inspect`, `Compose`, `Changes`). Inspect erlaubt einen freien, sicheren DOM-Picker mit Breadcrumb-/Parent-/Child-Navigation, registriertem Component-/Scope-Kontext und read-only Layout-Fakten. Compose verwendet ausschließlich explizit registrierte Website-Recipes. Changes exportiert nur Design-Diffs und begrenzte Annotationen/Intent als Agent-Brief. Auswahl- und Panel-Zustand bleiben aus Design-State und Recipes ausgeschlossen. Picker, Annotationen, Freeze Motion, Undo/Redo und Handoff schreiben keine Quelldateien.
-
 ## Aktueller Fokus
 
-1. Das öffentliche Paket und seine kleine Konfigurationsschnittstelle liefern.
-2. Das Bento-Experiment aus Astro #40 als ersten echten Adapter integrieren.
+1. V1 nach grünem Foundation-Base-Adapter-Proof als GitHub Release liefern.
+2. Das Bento-Experiment aus Astro #40 mit dem veröffentlichten v1-Paket stabilisieren.
 3. Die Tailwind-`@layer`-basierte Foundation-Base-Arbeitsweise dokumentieren.
 4. Danach die zweite Adapterintegration im Portfolio nachweisen.

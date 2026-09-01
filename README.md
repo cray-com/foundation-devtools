@@ -5,7 +5,7 @@
 ## Installation
 
 ```bash
-npm install --save-dev https://github.com/cray-com/foundation-devtools/releases/download/v0.2.1/cray-com-foundation-devtools-0.2.1.tgz
+npm install --save-dev https://github.com/cray-com/foundation-devtools/releases/download/v1.0.0/cray-com-foundation-devtools-1.0.0.tgz
 ```
 
 ## Astro
@@ -19,13 +19,19 @@ import { defineDevtoolsConfig } from '@cray-com/foundation-devtools'
 const config = defineDevtoolsConfig({
   project: 'astro-foundation',
   metadata: { fixture: 'listing', route: '/projects', locale: 'en' },
+  targets: [{ key: 'project-list', label: 'Project list', kind: 'section' }],
+  registrations: [
+    { key: 'project-grid', label: 'Project grid', scope: 'grid', target: 'project-list' },
+    { key: 'project-card', label: 'Project card', scope: 'card', target: 'project-list' },
+  ],
   families: [{
-    key: 'card', label: 'Card',
+    key: 'card-layout', label: 'Card layout', target: 'project-list',
     effect: { scope: 'card', attribute: 'card-variant' },
     variants: [{ name: 'default' }, { name: 'compact' }],
   }],
   controls: [{ type: 'range', key: 'grid-gap', label: 'Grid gap', min: 8, max: 48, default: 16,
-    effect: { scope: 'grid', variable: '--fd-grid-gap' } }]
+    target: 'project-list', effect: { scope: 'grid', variable: '--fd-grid-gap' } }],
+  compose: { families: ['card-layout'], controls: ['grid-gap'] }
 })
 ---
 <FoundationDevtools config={config} />
@@ -36,7 +42,9 @@ const config = defineDevtoolsConfig({
 Website-Markup deklariert Scopes mit `data-fd-scope`. Effects setzen ausschließlich CSS Custom Properties oder Datenattribute:
 
 ```html
-<section data-fd-scope="grid"><article data-fd-scope="card"></article></section>
+<section data-fd-target="project-list" data-fd-scope="grid">
+  <article data-fd-scope="card"></article>
+</section>
 ```
 
 Ohne eigenen Effect werden Familien als `data-fd-variant-card="default"` auf dem gleichnamigen Scope markiert.
@@ -55,7 +63,9 @@ const config = defineDevtoolsConfig({ project: 'site', targets: [
 }] });
 ```
 
-`changes(config, state)` und `changesJson` liefern ausschließlich geänderte Werte gegenüber `initialState`; `agentBrief` erzeugt eine knappe Markdown-Zusammenfassung. Panel-Auswahl und Vergleichsmodus sind UI-State und werden nicht exportiert. Ein Family-Effect kann stattdessen ein vorhandenes Website-Attribut wie `data-card-variant` setzen. Ein Control-Effect mit `attribute: 'card-density'` setzt entsprechend `data-card-density`.
+`registrations` geben ausgewählten DOM-Elementen einen expliziten Component-/Scope-Kontext. Die Registrierung leitet nichts aus CSS-Klassen ab. `compose` ist eine Allowlist: Nur dort aufgeführte vorhandene Families, Controls und Recipes erscheinen in Compose. Ungültige oder unbekannte Keys lassen die Konfiguration fehlschlagen.
+
+`changes(config, state)` und `changesJson` liefern ausschließlich geänderte Werte gegenüber `initialState`; `agentBrief` erzeugt eine knappe Markdown-Zusammenfassung. `handoff` ergänzt begrenzte Auswahl-, Annotation- und Intent-Daten. Panel, Picker, Auswahl, Annotationen und Vergleichsmodus bleiben UI-State und werden nicht als Designänderungen exportiert. Ein Family-Effect kann stattdessen ein vorhandenes Website-Attribut wie `data-card-variant` setzen. Ein Control-Effect mit `attribute: 'card-density'` setzt entsprechend `data-card-density`.
 
 Website-CSS kann Tailwind über semantische Layer verwenden. Dynamische Reglerwerte bleiben CSS Custom Properties:
 
@@ -78,13 +88,25 @@ Website-CSS kann Tailwind über semantische Layer verwenden. Dynamische Reglerwe
 
 ## Öffentliche Schnittstelle
 
-`DevtoolsConfig`, `Metadata`, `Target`, `Family`, `Variant`, `Range`, `Select`, `SelectOption`, `Toggle`, `DevtoolsState` sowie `defineDevtoolsConfig`, `validateConfig`, `initialState`, `validateState`, `encodeState`, `decodeState`, `stateUrl`, `applyEffects`, `changes`, `changesJson`, `agentBrief`, `resetBaseline`, `recipe` und `typescriptRecipe` sind serialisierbar bzw. strict typisiert. Nicht-kanonische Alias-Exporte werden nicht angeboten. Ungültige URL-Werte werden verworfen (fail-closed).
+Die Konfigurationstypen `DevtoolsConfig`, `Metadata`, `Target`, `DomRegistration`, `ComposeRegistration`, `Recipe`, `Family`, `Variant`, `Range`, `Select`, `SelectOption`, `Toggle` und `DevtoolsState` sind serialisierbar und strict typisiert.
+
+Der Design-State verwendet `defineDevtoolsConfig`, `validateConfig`, `initialState`, `validateState`, `encodeState`, `decodeState`, `stateUrl`, `applyEffects`, `changes`, `changesJson`, `agentBrief`, `resetBaseline`, `recipe`, `recipeRegistry` und `typescriptRecipe`. Der Inspector stellt `LayoutFacts`, `Annotation`, `domPath`, `resolvePath`, `layoutFacts`, `annotationFor`, `safeRoute` und `handoff` bereit. Nicht-kanonische Alias-Exporte werden nicht angeboten. Ungültige Config-, URL- und Handoff-Werte werden fail-closed verworfen oder begrenzt.
 
 Das Panel startet beim ersten Aufruf geöffnet und merkt sich danach Position, aktive Ansicht und den eingeklappten Zustand. Es bietet Reset, Permalink-, JSON- und TypeScript-Copy sowie JSON-Download. Es ist vollständig ausblendbar und per Cmd/Ctrl+Shift+D wiederherstellbar beziehungsweise umschaltbar. Tastaturfokus und Reduced Motion werden berücksichtigt. URL-State verwendet nur den Parameter `fd` und erhält vorhandene Parameter.
 
 ## DOM-Inspector (V1)
 
-Im Development-Modus stehen `Inspect`, `Compose` und `Changes` zur Verfügung. `Pick DOM` wählt beliebige Elemente; registrierte Scopes/Targets liefern Kontext, während Layout-Fakten (Bounding Box, Display, Grid, Gap, Position und Overflow) read-only bleiben. Bis zu acht begrenzte Annotationen und ein optionaler Intent werden zusammen mit dem changes-only Diff als `Copy agent brief` exportiert. `Freeze motion`, Undo/Redo, Tastaturkürzel und Drag/Snap unterstützen die Arbeit auf der echten Seite. Beim Auftauen kann eine laufende CSS-Transition browserbedingt nicht an ihrer exakten Zwischenposition fortgesetzt werden; fremde Inline-Styles werden dabei nicht verändert. Es gibt keine Source-Writes, keine Agent-Bridge und keinen visuellen Recipe-Generator.
+Im Development-Modus stehen `Inspect`, `Compose` und `Changes` zur Verfügung. `Pick DOM` wählt beliebige Elemente einschließlich offener Shadow Roots. Breadcrumb, Parent-/Child-Navigation, Page Map und registrierte Scopes/Targets liefern Kontext. Bounding Box, Display, Grid, Gap, Position und Overflow bleiben read-only. Selector, DOM-Pfad und begrenzter Kontext lassen sich separat kopieren.
+
+Bis zu acht begrenzte Annotationen und ein optionaler Intent werden zusammen mit dem changes-only Diff als `Copy agent brief` exportiert. Routen verlieren Credentials, Query und Fragment; Formwerte und vollständiges HTML werden nicht exportiert. `Freeze motion`, gruppiertes Undo/Redo sowie Edge-/Corner-Snap unterstützen die Arbeit auf der echten Seite. Beim Auftauen kann eine laufende CSS-Transition browserbedingt nicht an ihrer exakten Zwischenposition fortgesetzt werden; das Tool entfernt aber ausschließlich eigene Freeze-Styles und verändert keine fremden Inline-Styles. Es gibt keine Source-Writes, keine Agent-Bridge und keinen visuellen Recipe-Generator.
+
+### Zustand und Tastatur
+
+- URL: ausschließlich validierter Design-Preview-State im Parameter `fd`; fremde Query-Parameter bleiben erhalten.
+- `localStorage`: Panelposition, aktive Ansicht und Open-/Collapsed-Zustand.
+- `sessionStorage`: Auswahl, Annotationen und Intent. Hide überlebt keinen Reload.
+- Global: `Cmd/Ctrl + Shift + D` zeigt, versteckt oder stellt das Panel wieder her.
+- Bei Tool-Fokus oder aktivem Picker: `I` Picker, `V` Website-Modus, `1`/`2`/`3` Ansichten, `[`/`]` Parent/Child, `A` Annotation, `Shift + 2` Auswahl fokussieren, gehaltenes `Space` Picker aussetzen, `Cmd/Ctrl + Z` Undo, `Cmd/Ctrl + Shift + Z` Redo, `Cmd/Ctrl + Enter` Agent Brief und `Escape` zurück.
 
 ## Entwicklung
 
