@@ -181,7 +181,8 @@
   panel.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: panelRect.left + 20, clientY: panelRect.top + 20, pointerId: 7 }));
   panel.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 1, clientY: panelRect.top + 80, pointerId: 7 }));
   panel.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: 1, clientY: panelRect.top + 80, pointerId: 7 }));
-  const edgeSnap = panel.style.left === '0px' && panel.getBoundingClientRect().top >= 0;
+  const snappedRect = panel.getBoundingClientRect();
+  const edgeSnap = snappedRect.left === 0 && snappedRect.top >= 0 && snappedRect.left !== panelRect.left;
 
   const running = document.createElement('video'); const paused = document.createElement('video');
   document.body.append(running, paused); const runningBefore = { currentTime: running.currentTime, paused: running.paused }; const pausedBefore = { currentTime: paused.currentTime, paused: paused.paused };
@@ -193,8 +194,9 @@
   const restoredMotion = getComputedStyle(motion).animationPlayState !== 'paused' && getComputedStyle(motion).transitionProperty !== 'none' && !shadow.querySelector('style[data-fd-freeze]') && !document.querySelector('style[data-fd-freeze]');
   const videoState = frozenVideoState && running.paused === runningBefore.paused && running.currentTime === runningBefore.currentTime && paused.paused === pausedBefore.paused && paused.currentTime === pausedBefore.currentTime;
   running.remove(); paused.remove();
-  panel.style.left = '9999px'; panel.style.top = '9999px'; window.dispatchEvent(new Event('resize'));
-  const resizeClamped = panel.getBoundingClientRect().right <= innerWidth && panel.getBoundingClientRect().bottom <= innerHeight;
+  element.style.left = '9999px'; element.style.top = '9999px'; window.dispatchEvent(new Event('resize'));
+  const resizedRect = panel.getBoundingClientRect();
+  const resizeClamped = resizedRect.right <= innerWidth && resizedRect.bottom <= innerHeight && resizedRect.left >= 0 && resizedRect.top >= 0;
   const pickForReload = (target) => {
     root.querySelector('[data-action="pick"]').click();
     target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
