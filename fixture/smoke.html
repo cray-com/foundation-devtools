@@ -146,6 +146,8 @@
   hero.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
   const picked = root.querySelector('[data-map-target="hero"]').getAttribute('aria-pressed') === 'true' && hero.style.outline === '' && !hero.hasAttribute('tabindex');
   root.querySelector('[data-action="tab-inspect"]').click();
+  const factRows = root.querySelectorAll('dl.facts > div');
+  const factsSemantic = factRows.length > 0 && Array.from(factRows).every((row) => row.children.length === 2 && row.children[0].tagName === 'DT' && row.children[1].tagName === 'DD');
   const inspectCopyActions = Boolean(root.querySelector('[data-action="copy-selector"]')) && Boolean(root.querySelector('[data-action="copy-dom-path"]')) && Boolean(root.querySelector('[data-action="copy-context"]'));
   root.querySelector('[data-action="copy-context"]').click();
   await new Promise((resolve) => setTimeout(resolve, 50));
@@ -215,7 +217,7 @@
     sessionStorage.removeItem('foundation-devtools:fixture:restore-test');
     document.title = passed && initiallyOpen && collapsed && opened && hidden && hideNotPersisted && restoredCollapsed && shortcutOpened && shadowRevealed && feedback && copiedChanges && copiedBrief && originalApplied && modifiedRestored && emptyTarget && controlReset && marked && pickerSuspended && pickerResumed && cleaned && picked && shiftTwoFocused && targetReset && fullReset
       && groupedHistory && redoneHistory && videoState && documentFreeze && shadowFreeze && restoredMotion && pathChecks && edgeSnap && resizeClamped
-      && inspectMapWithoutSelection && browserShortcutIgnored && shortcutTabPersisted && inspectCopyActions && inspectCopied && restoredSelectionPass
+      && inspectMapWithoutSelection && browserShortcutIgnored && shortcutTabPersisted && factsSemantic && inspectCopyActions && inspectCopied && restoredSelectionPass
       ? 'FD browser PASS' : 'FD browser FAIL';
   }
 </script>
