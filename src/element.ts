@@ -24,7 +24,7 @@ import {
 } from './core.js';
 
 const styles = `
-:host { all: initial; position: fixed; inset: auto 12px 12px auto; z-index: 2147483647; color: #e9edf2; font: 12px/1.3 ui-monospace, SFMono-Regular, monospace; }
+:host { all: initial; display: block; position: fixed; inset: auto 12px 12px auto; z-index: 2147483647; color: #e9edf2; font: 12px/1.3 ui-monospace, SFMono-Regular, monospace; }
 * { box-sizing: border-box; }
 .panel { width: min(360px, calc(100vw - 24px)); max-height: min(760px, 70vh, calc(100vh - 24px)); overflow: auto; background: #17191c; border: 1px solid #454a51; border-radius: 6px; box-shadow: 0 5px 24px #0008; }
 .bar { display: flex; align-items: center; gap: 6px; padding: 5px 7px; background: #22262a; position: sticky; top: 0; } .tabs { display:flex; gap:2px; padding:4px 7px; border-bottom:1px solid #353a40; } .tabs button { flex:1; }
@@ -119,7 +119,9 @@ export class FoundationDevtoolsElement extends HTMLElement {
         const proposedTop = endEvent ? rect.top + endEvent.clientY - start.clientY : current.top;
         const left = Math.abs(proposedLeft) <= edge ? 0 : Math.abs(innerWidth - (proposedLeft + current.width)) <= edge ? innerWidth - current.width : proposedLeft;
         const top = Math.abs(proposedTop) <= edge ? 0 : Math.abs(innerHeight - (proposedTop + current.height)) <= edge ? innerHeight - current.height : proposedTop;
-        this.setPanelPosition(left, top); this.savePanelPosition(left, top);
+        this.setPanelPosition(left, top);
+        const snapped = this.panel!.getBoundingClientRect();
+        this.savePanelPosition(snapped.left, snapped.top);
       };
       this.panel!.addEventListener('pointermove', move); this.panel!.addEventListener('pointerup', end); this.panel!.addEventListener('pointercancel', end);
       window.addEventListener('pointermove', move, true); window.addEventListener('pointerup', end, { once: true, capture: true }); window.addEventListener('pointercancel', end, { once: true, capture: true });
@@ -342,13 +344,16 @@ export class FoundationDevtoolsElement extends HTMLElement {
     if (!this.panel) return;
     const rect = this.panel.getBoundingClientRect();
     const maxLeft = Math.max(0, innerWidth - rect.width); const maxTop = Math.max(0, innerHeight - rect.height);
-    this.panel.style.left = `${Math.max(0, Math.min(maxLeft, left))}px`; this.panel.style.top = `${Math.max(0, Math.min(maxTop, top))}px`;
-    this.panel.style.right = 'auto'; this.panel.style.bottom = 'auto';
+    this.style.left = `${Math.max(0, Math.min(maxLeft, left))}px`; this.style.top = `${Math.max(0, Math.min(maxTop, top))}px`;
+    this.style.right = 'auto'; this.style.bottom = 'auto';
   }
   private savePanelPosition(left: number, top: number): void { try { localStorage.setItem(`${this.storageKey}:position`, JSON.stringify({ left, top })); } catch {} }
   private clampPanel = (): void => { if (!this.panel) return; const rect = this.panel.getBoundingClientRect(); this.setPanelPosition(rect.left, rect.top); };
   private restorePosition(): void {
-    try { const value = JSON.parse(localStorage.getItem(`${this.storageKey}:position`) ?? 'null'); if (value && Number.isFinite(value.left) && Number.isFinite(value.top)) { this.panel!.style.left = `${Math.max(0, Math.min(innerWidth - this.panel!.offsetWidth, value.left))}px`; this.panel!.style.top = `${Math.max(0, Math.min(innerHeight - this.panel!.offsetHeight, value.top))}px`; this.panel!.style.right = 'auto'; this.panel!.style.bottom = 'auto'; } } catch {}
+    try {
+      const value = JSON.parse(localStorage.getItem(`${this.storageKey}:position`) ?? 'null');
+      if (value && Number.isFinite(value.left) && Number.isFinite(value.top)) this.setPanelPosition(value.left, value.top);
+    } catch {}
   }
   private restorePanelMode(): void {
     let mode: 'open' | 'collapsed' = 'open';

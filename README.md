@@ -80,7 +80,7 @@ Website-CSS kann Tailwind über semantische Layer verwenden. Dynamische Reglerwe
 
 `DevtoolsConfig`, `Metadata`, `Target`, `Family`, `Variant`, `Range`, `Select`, `SelectOption`, `Toggle`, `DevtoolsState` sowie `defineDevtoolsConfig`, `validateConfig`, `initialState`, `validateState`, `encodeState`, `decodeState`, `stateUrl`, `applyEffects`, `changes`, `changesJson`, `agentBrief`, `resetBaseline`, `recipe` und `typescriptRecipe` sind serialisierbar bzw. strict typisiert. Nicht-kanonische Alias-Exporte werden nicht angeboten. Ungültige URL-Werte werden verworfen (fail-closed).
 
-Das Panel startet platzsparend eingeklappt. Es bietet Reset, Permalink-, JSON- und TypeScript-Copy sowie JSON-Download. Es ist vollständig ausblendbar und per Cmd/Ctrl+Shift+D wiederherstellbar beziehungsweise umschaltbar. Tastaturfokus und Reduced Motion werden berücksichtigt. URL-State verwendet nur den Parameter `fd` und erhält vorhandene Parameter.
+Das Panel startet beim ersten Aufruf geöffnet und merkt sich danach Position, aktive Ansicht und den eingeklappten Zustand. Es bietet Reset, Permalink-, JSON- und TypeScript-Copy sowie JSON-Download. Es ist vollständig ausblendbar und per Cmd/Ctrl+Shift+D wiederherstellbar beziehungsweise umschaltbar. Tastaturfokus und Reduced Motion werden berücksichtigt. URL-State verwendet nur den Parameter `fd` und erhält vorhandene Parameter.
 
 ## DOM-Inspector (V1)
 
