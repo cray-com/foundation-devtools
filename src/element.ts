@@ -30,7 +30,7 @@ const styles = `
 .bar { display: flex; align-items: center; gap: 6px; padding: 5px 7px; background: #22262a; position: sticky; top: 0; } .tabs { display:flex; gap:2px; padding:4px 7px; border-bottom:1px solid #353a40; } .tabs button { flex:1; }
 .title { flex: 1; font-weight: 700; } button { border: 0; border-radius: 3px; padding: 4px 6px; color: inherit; background: #292e34; cursor: pointer; } .icon { background: transparent; font-size: 15px; }
 button:focus, select:focus, input:focus { outline: 2px solid #74b9ff; outline-offset: 1px; } button[aria-pressed="true"] { background: #4a5868; color: #fff; }
-.body { display: grid; gap: 8px; padding: 9px; } .compare { display: flex; gap: 3px; } .map { display: grid; gap: 2px; padding: 5px; border: 1px solid #353a40; border-radius: 4px; } .map::before { content: 'Page'; padding: 1px 3px 3px; color: #9ba3ad; text-transform: uppercase; letter-spacing: .08em; } .map button { display: flex; justify-content: space-between; gap: 8px; text-align: left; } .count { color: #9ba3ad; font-variant-numeric: tabular-nums; }
+.body { display: grid; gap: 8px; padding: 9px; } .facts { display: grid; gap: 2px; margin: 0; } .facts > div { display: grid; grid-template-columns: minmax(0, .7fr) minmax(0, 1.3fr); gap: 8px; } .facts dt { color: #9ba3ad; } .facts dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: #e9edf2; } .compare { display: flex; gap: 3px; } .map { display: grid; gap: 2px; padding: 5px; border: 1px solid #353a40; border-radius: 4px; } .map::before { content: 'Page'; padding: 1px 3px 3px; color: #9ba3ad; text-transform: uppercase; letter-spacing: .08em; } .map button { display: flex; justify-content: space-between; gap: 8px; text-align: left; } .count { color: #9ba3ad; font-variant-numeric: tabular-nums; }
 .control { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px; } .control.changed label::after { content: 'modified'; color: #9dbde0; font-size: 10px; } .control > label { grid-column: 1; } .control > input, .control > select { grid-column: 1 / -1; } .control > [data-action='reset-control'] { grid-column: 2; grid-row: 1; padding: 0 3px; color: #9ba3ad; background: transparent; font-size: 10px; }
 label { display: flex; justify-content: space-between; gap: 8px; color: #c8cdd3; } output { margin-left: auto; color: #fff; }
 input, select { width: 100%; min-width: 0; color: #fff; background: #292e34; border: 1px solid #555b64; border-radius: 3px; padding: 3px; } input[type=checkbox] { width: auto; justify-self: start; }
@@ -395,8 +395,14 @@ export class FoundationDevtoolsElement extends HTMLElement {
     const breadcrumb = document.createElement('nav'); breadcrumb.setAttribute('aria-label', 'DOM breadcrumb');
     this.ancestors(selected).forEach((element, index, all) => { const button = document.createElement('button'); button.textContent = element.tagName.toLowerCase(); button.setAttribute('aria-label', `Select ${element.tagName.toLowerCase()} in breadcrumb`); button.onclick = () => { this.selected = element; this.render(); this.markSelected(); }; breadcrumb.append(button); if (index < all.length - 1) breadcrumb.append(document.createTextNode(' › ')); }); body.append(breadcrumb);
     const context = this.contextFor(selected); const contextText = document.createElement('p'); contextText.setAttribute('aria-label', 'Registered context'); contextText.textContent = `Target: ${context.target ?? '—'} · Component: ${context.component ?? '—'} · Scope: ${context.scope ?? '—'}`; body.append(contextText);
-    const facts = layoutFacts(selected); const list = document.createElement('dl');
-    for (const [key, value] of Object.entries(facts)) { const d = document.createElement('div'); d.textContent = `${key}: ${typeof value === 'object' ? `${value.width} × ${value.height}` : value}`; list.append(d); } body.append(list);
+    const facts = layoutFacts(selected); const list = document.createElement('dl'); list.className = 'facts';
+    for (const [key, value] of Object.entries(facts)) {
+      const row = document.createElement('div');
+      const term = document.createElement('dt'); term.textContent = key;
+      const description = document.createElement('dd'); description.textContent = typeof value === 'object' ? `${value.width} × ${value.height}` : String(value);
+      row.append(term, description); list.append(row);
+    }
+    body.append(list);
     const nav = document.createElement('div');
     for (const [label, element] of [['Parent', this.parentOf(selected)], ['Child', this.childOf(selected)]] as const) { const button = document.createElement('button'); button.textContent = label; button.disabled = !element; button.onclick = () => { if (element) { this.selected = element; this.render(); this.markSelected(); } }; nav.append(button); } body.append(nav);
     const inspectActions = document.createElement('div');
