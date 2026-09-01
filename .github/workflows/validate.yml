@@ -23,3 +23,5 @@ jobs:
       - run: npm run check
       - run: npm test
       - run: npm run build
+      - run: npm pack --dry-run
+      - run: git diff --check
